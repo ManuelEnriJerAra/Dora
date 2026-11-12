@@ -60,6 +60,10 @@ Commands are written to the running process input stream.
 
 Stop should prefer graceful server command behavior before killing the process. UI buttons should reflect whether the process exists and is alive.
 
+Force stop (`forzarPararServidor`) must close the whole process tree through `controlador.ProcessTreeTerminator`. Forge/NeoForge servers start through `run.bat`/`run.sh`, so the process Dora holds is `cmd.exe`/`sh` and the real Java server is a child; killing only the root leaves an orphaned server holding the world and the port.
+
+Quitting with active servers (`vista.SalidaServidoresActivos`) sends `stop`, then waits in 60-second rounds without killing anything. After each round the user chooses to keep waiting, force close and exit, or cancel the exit. Never add a silent force-kill timeout to the quit path: large or modded worlds can take longer than a minute to save.
+
 `controlador.automation.ServerAutomationService` reuses the same `GestorServidores` lifecycle methods for scheduled starts, stops, restarts, and commands. Keep future automation behavior routed through the manager so manual controls and scheduled actions do not drift.
 
 ## Import Pipeline

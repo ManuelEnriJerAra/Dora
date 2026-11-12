@@ -80,6 +80,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -2938,40 +2939,39 @@ public class GestorServidores {
                 .toList();
     }
 
-    // Detener todos los servidores activos para salir del programa
-    public void detenerServidoresActivosParaSalir() {
+    // Pedir una parada segura ("stop") a todos los servidores activos para salir del programa.
+    // Devuelve los servidores a los que se ha pedido la parada.
+    public List<Server> pedirParadaServidoresActivosParaSalir() {
         List<Server> activos = getServidoresActivos();
-        if (activos.isEmpty()) return;
-
         for (Server server : activos) {
             try {
-                safePararServidor(server); // hacemos una parada segura en cada uno de ellos
+                safePararServidor(server);
             } catch (RuntimeException ignored) {
             }
         }
+        return activos;
+    }
 
-        long cuentaAtras = System.currentTimeMillis() + 7_000;
-        // contamos 7 segundos
-        for (Server server : activos) {
-            Process proceso = server.getServerProcess();
+    // Esperar hasta "espera" a que los servidores indicados terminen (incluidos procesos hijos).
+    // Devuelve los que siguen vivos. No fuerza ningún cierre: guardar el mundo puede tardar.
+    public List<Server> esperarParadaServidores(List<Server> servidores, Duration espera) throws InterruptedException {
+        long limite = System.nanoTime() + Math.max(0L, espera.toNanos());
+        for (Server server : servidores) {
+            Process proceso = server == null ? null : server.getServerProcess();
             if (proceso == null) continue;
-            if (!proceso.isAlive()) continue;
-            // si el proceso está vivo restamos los segundos transcurridos
-            long restante = cuentaAtras - System.currentTimeMillis();
+            long restante = limite - System.nanoTime();
             if (restante <= 0) break;
-            try {
-                proceso.waitFor(restante, java.util.concurrent.TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
+            proceso.waitFor(restante, TimeUnit.NANOSECONDS);
         }
+        return servidores.stream()
+                .filter(s -> s != null && ProcessTreeTerminator.isTreeAlive(s.getServerProcess()))
+                .toList();
+    }
 
-        // si no se han podido parar los servidores de forma segura forzamos su cierre
-        for (Server server : activos) {
-            Process proceso = server.getServerProcess();
-            if (proceso == null) continue;
-            if (!proceso.isAlive()) continue;
+    // Forzar el cierre de los servidores indicados que sigan vivos.
+    public void forzarPararServidores(List<Server> servidores) {
+        for (Server server : servidores) {
+            if (server == null || !ProcessTreeTerminator.isTreeAlive(server.getServerProcess())) continue;
             try {
                 forzarPararServidor(server);
             } catch (RuntimeException ignored) {
@@ -3093,7 +3093,7 @@ public class GestorServidores {
     public void forzarPararServidor(Server server){
         Process proceso = server.getServerProcess();
 
-        if(proceso==null || !proceso.isAlive()) {
+        if(!ProcessTreeTerminator.isTreeAlive(proceso)) {
             server.appendConsoleLinea("[INFO] El servidor no está en ejecución");
             server.setServerProcess(null);
             server.setIniciando(false);
@@ -3102,25 +3102,20 @@ public class GestorServidores {
         }
         server.appendConsoleLinea("[INFO] Forzando cierre del servidor...");
 
-        // 1er Intento
-        proceso.destroy();
+        // Cerramos el árbol completo: en Forge/NeoForge el proceso guardado es run.bat/run.sh y el
+        // servidor Java real es un proceso hijo que, si no, quedaría vivo y huérfano.
+        boolean destruido = false;
         try{
-            // esperamos a ver si lo hemos destruido
-            boolean destruido = proceso.waitFor(3, TimeUnit.SECONDS);
-            if(!destruido){ // 2do intento, ahora es personal
-                proceso.destroyForcibly();
-                destruido = proceso.waitFor(3, TimeUnit.SECONDS);
-
-            }
+            destruido = ProcessTreeTerminator.terminate(proceso, Duration.ofSeconds(3), Duration.ofSeconds(3));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally{
             if(destruido){
                 server.appendConsoleLinea("[INFO] Se ha cerrado el servidor de forma forzada, no se han guardado los cambios.");
             }
             else{
                 server.appendConsoleLinea("[ERROR] No se ha podido cerrar el servidor.");
             }
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally{
             // Si no está vivo limpiamos referencia
             if(!proceso.isAlive()) server.setServerProcess(null);
             if(!proceso.isAlive()) server.setIniciando(false);
