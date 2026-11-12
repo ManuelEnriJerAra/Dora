@@ -184,7 +184,7 @@ public class PanelJugadores extends JPanel {
         configurarBotonCabecera(btnWhitelist, "Whitelist", "doraicons/whitelist.svg", () -> abrirDialogoLista("Whitelist", TipoLista.WHITELIST));
         configurarBotonCabecera(btnBaneados, "Baneados", "doraicons/user-block.svg", this::abrirDialogoBaneados);
         configurarBotonCabecera(btnOps, "OPs", "doraicons/shield-user.svg", () -> abrirDialogoLista("OPs", TipoLista.OPS));
-        configurarBotonDebug(btnDebugAddPlayer, "Anadir jugador falso", "doraicons/plus.svg", this::addFakePlayer);
+        configurarBotonDebug(btnDebugAddPlayer, "Añadir jugador falso", "doraicons/plus.svg", this::addFakePlayer);
         configurarBotonDebug(btnDebugRemovePlayer, "Eliminar jugador falso", "doraicons/minus.svg", this::removeFakePlayer);
         debugModeListener = DebugModeUiBinder.createUiListener(this::actualizarModoDebug);
         DebugMode.addPropertyChangeListener(debugModeListener);
@@ -673,7 +673,7 @@ public class PanelJugadores extends JPanel {
         AppTheme.applyStandardScrollSpeed(scroll);
 
         JButton btnAdd = new FlatButton();
-        btnAdd.setText("Anadir");
+        btnAdd.setText("Añadir");
         JButton btnRemove = new FlatButton();
         btnRemove.setText("Quitar");
 
@@ -1059,7 +1059,7 @@ public class PanelJugadores extends JPanel {
                 ? JOptionPane.showInputDialog(
                         SwingUtilities.getWindowAncestor(this),
                         "IP:",
-                        "Anadir a " + tipo.name(),
+                        "Añadir a " + tipo.name(),
                         JOptionPane.QUESTION_MESSAGE
                 )
                 : mostrarDialogoAnadirJugador(tipo);
@@ -1278,7 +1278,7 @@ public class PanelJugadores extends JPanel {
                 checkingIcon.setAngleRadians(0d);
                 checkingLabel.setVisible(true);
                 knownEmptyLabel.setText("Buscando jugadores conocidos...");
-                mojangEmptyLabel.setText("Preparando comprobacion exacta...");
+                mojangEmptyLabel.setText("Preparando comprobación exacta...");
                 ((CardLayout) knownCards.getLayout()).show(knownCards, "empty");
                 ((CardLayout) mojangCards.getLayout()).show(mojangCards, "empty");
                 if (!checkingSpinTimer.isRunning()) {
@@ -1297,11 +1297,11 @@ public class PanelJugadores extends JPanel {
         panel.add(suggestionPanel, BorderLayout.CENTER);
 
         JButton okButton = new FlatButton();
-        okButton.setText("Anadir");
+        okButton.setText("Añadir");
         JButton cancelButton = new FlatButton();
         cancelButton.setText("Cancelar");
 
-        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "Anadir a " + tipo.name(), true);
+        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "Añadir a " + tipo.name(), true);
         dialogRef[0] = dialog;
         okButton.addActionListener(e -> {
             String text = inputField.getText() == null ? "" : inputField.getText().strip();

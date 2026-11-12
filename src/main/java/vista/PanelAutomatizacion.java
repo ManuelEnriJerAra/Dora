@@ -80,7 +80,7 @@ final class PanelAutomatizacion extends JPanel {
             new TriggerOption(AutomationTriggerType.APP_START, "Al iniciar Dora"),
             new TriggerOption(AutomationTriggerType.BEFORE_STOP, "Antes de apagado"),
             new TriggerOption(AutomationTriggerType.BEFORE_RESTART, "Antes de reinicio"),
-            new TriggerOption(AutomationTriggerType.AFTER_START, "Despues de encendido")
+            new TriggerOption(AutomationTriggerType.AFTER_START, "Después de encendido")
     };
     private static final IntervalUnitOption[] INTERVAL_UNIT_OPTIONS = {
             new IntervalUnitOption(AutomationIntervalUnit.SECONDS, "s"),
@@ -558,7 +558,7 @@ final class PanelAutomatizacion extends JPanel {
             AutomationTriggerType selectedTrigger = selectedTrigger(triggerCombo);
             detailsLayout.show(detailsPanel, detailsCardName(selectedTrigger));
             boolean afterStart = selectedTrigger == AutomationTriggerType.AFTER_START;
-            relativeLabel.setText(afterStart ? "Despues" : "Antes");
+            relativeLabel.setText(afterStart ? "Después" : "Antes");
             AutomationIntervalUnit selectedUnit = selectedIntervalUnit(relativeUnitCombo);
             IntervalUnitOption[] relativeOptions = relativeUnitOptionsFor(selectedTrigger);
             relativeUnitCombo.setModel(new DefaultComboBoxModel<>(relativeOptions));
@@ -754,7 +754,7 @@ final class PanelAutomatizacion extends JPanel {
             case APP_START -> "Inicio de Dora";
             case BEFORE_STOP -> "Antes de apagado";
             case BEFORE_RESTART -> "Antes de reinicio";
-            case AFTER_START -> "Despues de encendido";
+            case AFTER_START -> "Después de encendido";
         };
     }
 

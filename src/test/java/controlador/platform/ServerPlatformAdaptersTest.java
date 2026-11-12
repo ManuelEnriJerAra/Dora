@@ -643,7 +643,7 @@ class ServerPlatformAdaptersTest {
     }
 
     @Test
-    void creationClients_vanillaDebeExcluirReleasesSinServerJarConocido() {
+    void creationClients_vanillaDebeExcluirReleasesSinServerJarConocido() throws Exception {
         VanillaServerPlatformAdapter adapter = new VanillaServerPlatformAdapter(new FakeMojangApi(null, List.of(
                 new MojangAPI.MinecraftVersionInfo("1.2.5", "release"),
                 new MojangAPI.MinecraftVersionInfo("1.2.4", "release"),
@@ -824,6 +824,22 @@ class ServerPlatformAdaptersTest {
         assertThat(quiltServer.getLoaderVersion()).isEqualTo("0.29.2");
         assertThat(Files.exists(tempDir.resolve("quilt-created").resolve("mods"))).isTrue();
         assertFullServerProperties(tempDir.resolve("quilt-created"), "Dora Quilt 1.21.1");
+    }
+
+    @Test
+    void vanilla_sinConexionDevuelveUnMensajeLegible() {
+        MojangAPI offline = new MojangAPI() {
+            @Override
+            public List<MojangAPI.MinecraftVersionInfo> obtenerListaVersionesConTipo() {
+                throw new RuntimeException(new java.net.ConnectException("Connection refused"));
+            }
+        };
+        VanillaServerPlatformAdapter adapter = new VanillaServerPlatformAdapter(offline);
+
+        assertThatThrownBy(adapter::listCreationOptions)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Revisa la conexión")
+                .hasMessageNotContaining("java.net");
     }
 
     @Test

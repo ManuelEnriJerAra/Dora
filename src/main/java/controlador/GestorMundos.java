@@ -216,6 +216,7 @@ public final class GestorMundos {
 
         try {
             copiarConDimensiones(origen, destino);
+            quitarArchivosDePrevisualizacion(destino);
             JOptionPane.showMessageDialog(parent,
                     "Mundo exportado en: " + destino,
                     "Exportar mundo",
@@ -377,6 +378,15 @@ public final class GestorMundos {
     }
 
     // Copia el mundo principal junto con sus dimensiones Nether y End si existen.
+    // La previsualización del mapa es una caché de Dora: no forma parte del mundo y puede ocupar varios MB.
+    static void quitarArchivosDePrevisualizacion(Path mundoExportado) throws IOException {
+        if (mundoExportado == null) {
+            return;
+        }
+        Files.deleteIfExists(mundoExportado.resolve("preview.png"));
+        Files.deleteIfExists(mundoExportado.resolve(controlador.world.WorldFilesService.PREVIEW_METADATA_FILE));
+    }
+
     private static void copiarConDimensiones(Path origenBase, Path destinoBase) throws IOException {
         Utilidades.copiarDirectorio(origenBase, destinoBase);
         copiarSiExiste(origenBase.resolveSibling(origenBase.getFileName() + SUFIJO_NETHER), destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_NETHER));

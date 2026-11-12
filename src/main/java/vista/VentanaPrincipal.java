@@ -1183,7 +1183,7 @@ public class VentanaPrincipal extends JFrame {
         menu.add(contador);
 
         if(activos.isEmpty()){
-            MenuItem ninguno = new MenuItem("Ningun servidor activo");
+            MenuItem ninguno = new MenuItem("Ningún servidor activo");
             ninguno.setEnabled(false);
             menu.add(ninguno);
         } else {

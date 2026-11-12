@@ -1922,12 +1922,12 @@ public class GestorServidores {
         String newFolder = targetEcosystem == ServerEcosystemType.MODS ? "mods" : "plugins";
         JOptionPane.showMessageDialog(
                 null,
-                "La conversion cambio de ecosistema. Los archivos anteriores siguen en "
+                "La conversión cambió de ecosistema. Los archivos anteriores siguen en "
                         + Path.of(server.getServerDir()).resolve(oldFolder)
                         + ". Las nuevas extensiones deben instalarse en "
                         + Path.of(server.getServerDir()).resolve(newFolder)
-                        + ". La cache local de extensiones se ha actualizado conservando los metadatos anteriores.",
-                "Conversion completada",
+                        + ". La caché local de extensiones se ha actualizado conservando los metadatos anteriores.",
+                "Conversión completada",
                 JOptionPane.INFORMATION_MESSAGE
         );
     }

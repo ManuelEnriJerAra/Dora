@@ -61,7 +61,7 @@ public record InstalledExtensionStatus(
             return compatibility.summary();
         }
         if (updateAvailable) {
-            return "Actualizacion disponible";
+            return "Actualización disponible";
         }
         return "Instalada correctamente";
     }

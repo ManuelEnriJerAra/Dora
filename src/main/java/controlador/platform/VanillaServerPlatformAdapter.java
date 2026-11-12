@@ -56,8 +56,16 @@ public final class VanillaServerPlatformAdapter extends AbstractServerPlatformAd
     }
 
     @Override
-    public java.util.List<ServerCreationOption> listCreationOptions() {
-        return mojangApi.obtenerListaVersionesConTipo().stream()
+    public java.util.List<ServerCreationOption> listCreationOptions() throws IOException {
+        java.util.List<MojangAPI.MinecraftVersionInfo> versions;
+        try {
+            versions = mojangApi.obtenerListaVersionesConTipo();
+        } catch (RuntimeException e) {
+            // MojangAPI envuelve los fallos de red en RuntimeException; sin esto el usuario veía
+            // "java.net.ConnectException: ..." al pulsar "Crear servidor" sin conexión.
+            throw new IOException(PlatformRemoteLookupPolicy.remoteFailureMessage(), e);
+        }
+        return versions.stream()
                 .filter(VanillaServerPlatformAdapter::hasKnownServerJar)
                 .map(version -> new ServerCreationOption(
                         ServerPlatform.VANILLA,
@@ -88,7 +96,12 @@ public final class VanillaServerPlatformAdapter extends AbstractServerPlatformAd
 
         Files.createDirectories(request.targetDirectory());
         MojangAPI api = request.mojangApi() == null ? mojangApi : request.mojangApi();
-        String url = api.obtenerUrlServerJar(request.minecraftVersion());
+        String url;
+        try {
+            url = api.obtenerUrlServerJar(request.minecraftVersion());
+        } catch (RuntimeException e) {
+            throw new IOException(PlatformRemoteLookupPolicy.remoteFailureMessage(), e);
+        }
         if (url == null || url.isBlank()) {
             throw new IOException("No se ha podido obtener la URL del servidor para la versión " + request.minecraftVersion());
         }
