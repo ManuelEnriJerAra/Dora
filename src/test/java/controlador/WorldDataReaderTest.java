@@ -143,6 +143,7 @@ class WorldDataReaderTest {
         data.putLong("DayTime", 6000L);
         data.putInt("raining", 1);
         data.putInt("DifficultyLocked", 1);
+        data.putByte("hardcore", (byte) 0);
         CompoundTag gameRules = new CompoundTag();
         gameRules.putString("keepInventory", "true");
         data.put("GameRules", gameRules);
@@ -158,7 +159,8 @@ class WorldDataReaderTest {
         assertThat(metadata.dayTime()).isEqualTo("Dia 1 - 12:00");
         assertThat(metadata.weatherSummary()).isEqualTo("Lluvia");
         assertThat(metadata.difficulty()).isEqualTo("Normal");
-        assertThat(metadata.difficultyLocked()).isNotBlank();
+        assertThat(metadata.difficultyLocked()).isEqualTo("✓");
+        assertThat(metadata.hardcore()).isEqualTo("✗");
         assertThat(metadata.gameRules()).containsEntry(
                 "keepInventory",
                 WorldDataReader.getGameRules(TestWorldFixtures.world(worldDir, "snapshot")).get("keepInventory")

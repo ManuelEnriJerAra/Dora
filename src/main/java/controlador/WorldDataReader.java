@@ -552,7 +552,7 @@ public class WorldDataReader {
     private static String readBooleanLabel(CompoundTag data, String key) {
         Tag<?> tag = data == null || key == null ? null : data.get(key);
         if(tag == null) return null;
-        return readBoolean(tag) ? "âœ“" : "âœ—";
+        return readBoolean(tag) ? "✓" : "✗";
     }
 
     private static String readWeatherSummary(CompoundTag data) {
