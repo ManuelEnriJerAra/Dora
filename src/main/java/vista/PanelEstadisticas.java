@@ -85,6 +85,13 @@ public class PanelEstadisticas extends JPanel {
             DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss").withZone(ZoneId.systemDefault());
     private static final Map<String, StatsHistory> HISTORY_BY_SERVER = new ConcurrentHashMap<>();
     private static final Map<String, CpuSampleState> CPU_SAMPLE_STATE_BY_SERVER = new ConcurrentHashMap<>();
+    // RAM y disco se leen lanzando procesos externos (jstat, PowerShell, ps). Hacerlo cada segundo por
+    // servidor cuesta más CPU que el propio servidor en reposo, así que se reutiliza la última lectura.
+    static final long EXPENSIVE_SAMPLE_INTERVAL_MS = 5_000L;
+    private static final Map<Long, TimedValue<Long>> RAM_SAMPLE_CACHE_BY_PID = new ConcurrentHashMap<>();
+    private static final Map<Long, TimedValue<ProcessMetricsSample>> METRICS_SAMPLE_CACHE_BY_PID = new ConcurrentHashMap<>();
+    private static final Map<Long, Integer> JSTAT_FAILURES_BY_PID = new ConcurrentHashMap<>();
+    private static final int JSTAT_MAX_FAILURES = 3;
     private static final Set<GestorServidores> REGISTERED_GESTORES = ConcurrentHashMap.newKeySet();
     private static final ObjectMapper HISTORY_MAPPER = new ObjectMapper();
     private static final ScheduledExecutorService BACKGROUND_SAMPLER = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -720,8 +727,13 @@ public class PanelEstadisticas extends JPanel {
             Process process = server.getServerProcess();
             running = process != null && process.isAlive();
         }
+        if (!running) {
+            // Un servidor apagado no consume nada: no mostrar la última lectura (por ejemplo la RAM
+            // cargada del histórico de otra sesión o la muestra previa a la parada).
+            return new ServerResourceSnapshot(false, 0d, 0L, ramMaxMb, 0d);
+        }
         return new ServerResourceSnapshot(
-                running,
+                true,
                 history.lastCpuPercent(),
                 history.lastRamValue(),
                 ramMaxMb,
@@ -816,8 +828,28 @@ public class PanelEstadisticas extends JPanel {
             return -1L;
         }
 
-        long pid = process.pid();
-        long heapUsageMb = readHeapUsageWithJstat(pid);
+        long rootPid = process.pid();
+        long now = System.currentTimeMillis();
+        TimedValue<Long> cached = RAM_SAMPLE_CACHE_BY_PID.get(rootPid);
+        if (cached != null && now - cached.atMillis() < EXPENSIVE_SAMPLE_INTERVAL_MS) {
+            return cached.value();
+        }
+        long value = readServerRamUsageMbUncached(resolveServerJvm(process).pid());
+        RAM_SAMPLE_CACHE_BY_PID.put(rootPid, new TimedValue<>(value, now));
+        return value;
+    }
+
+    private static long readServerRamUsageMbUncached(long pid) {
+        long heapUsageMb = -1L;
+        if (JSTAT_FAILURES_BY_PID.getOrDefault(pid, 0) < JSTAT_MAX_FAILURES) {
+            heapUsageMb = readHeapUsageWithJstat(pid);
+            if (heapUsageMb < 0L) {
+                // Sin jstat (solo JRE) o el proceso no es una JVM accesible: tras varios fallos dejamos de lanzarlo.
+                JSTAT_FAILURES_BY_PID.merge(pid, 1, Integer::sum);
+            } else {
+                JSTAT_FAILURES_BY_PID.remove(pid);
+            }
+        }
         if (heapUsageMb > 0L) {
             return heapUsageMb;
         }
@@ -827,6 +859,39 @@ public class PanelEstadisticas extends JPanel {
             return residentUsageMb;
         }
         return heapUsageMb >= 0L ? heapUsageMb : -1L;
+    }
+
+    /**
+     * Proceso de la JVM del servidor. Forge/NeoForge arrancan con run.bat/run.sh, así que el proceso
+     * que guarda Dora es cmd.exe/sh y la JVM real es un hijo: medir el padre daría ~0% de CPU y la RAM
+     * del intérprete de comandos.
+     */
+    static ProcessHandle resolveServerJvm(Process process) {
+        ProcessHandle root = process.toHandle();
+        if (looksLikeJava(root)) {
+            return root;
+        }
+        try {
+            return root.descendants()
+                    .filter(ProcessHandle::isAlive)
+                    .filter(PanelEstadisticas::looksLikeJava)
+                    .findFirst()
+                    .orElse(root);
+        } catch (RuntimeException e) {
+            return root;
+        }
+    }
+
+    private static boolean looksLikeJava(ProcessHandle handle) {
+        String command = handle.info().command().orElse("");
+        String name = Path.of(command).getFileName() == null ? "" : Path.of(command).getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.equals("java") || name.equals("java.exe") || name.equals("javaw.exe");
+    }
+
+    static void clearExpensiveSampleCachesForTests() {
+        RAM_SAMPLE_CACHE_BY_PID.clear();
+        METRICS_SAMPLE_CACHE_BY_PID.clear();
+        JSTAT_FAILURES_BY_PID.clear();
     }
 
     private static DiskActivitySample readServerDiskActivity(Server server) {
@@ -921,7 +986,7 @@ public class PanelEstadisticas extends JPanel {
     }
 
     private static long readHeapUsageWithJstat(long pid) {
-        String output = ejecutarComando(List.of("jstat", "-J-Duser.language=en", "-J-Duser.country=US", "-gc", String.valueOf(pid)), 700);
+        String output = ejecutarComando(List.of(resolveJstatCommand(), "-J-Duser.language=en", "-J-Duser.country=US", "-gc", String.valueOf(pid)), 700);
         if (output == null || output.isBlank()) {
             return -1L;
         }
@@ -968,6 +1033,26 @@ public class PanelEstadisticas extends JPanel {
         return Math.round(usedKb / 1024d);
     }
 
+    // Preferimos el jstat del JDK con el que corre Dora; si no está (JRE), el del PATH.
+    private static String resolveJstatCommand() {
+        try {
+            String javaCommand = ProcessHandle.current().info().command().orElse(null);
+            if (javaCommand != null) {
+                Path binDir = Path.of(javaCommand).getParent();
+                if (binDir != null) {
+                    for (String name : List.of("jstat", "jstat.exe")) {
+                        Path candidate = binDir.resolve(name);
+                        if (Files.isExecutable(candidate)) {
+                            return candidate.toString();
+                        }
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return "jstat";
+    }
+
     private static double readDoubleColumn(String[] headers, String[] values, String name) {
         for (int i = 0; i < headers.length; i++) {
             if (!name.equalsIgnoreCase(headers[i])) {
@@ -1006,6 +1091,10 @@ public class PanelEstadisticas extends JPanel {
     }
 
     private static long readResidentUsageUnix(long pid) {
+        long fromProc = readResidentUsageFromProc(pid);
+        if (fromProc >= 0L) {
+            return fromProc;
+        }
         String output = ejecutarComando(List.of("ps", "-o", "rss=", "-p", String.valueOf(pid)), 700);
         if (output == null || output.isBlank()) {
             return -1L;
@@ -1016,6 +1105,24 @@ public class PanelEstadisticas extends JPanel {
         } catch (NumberFormatException ignored) {
             return -1L;
         }
+    }
+
+    // Linux: /proc/<pid>/status se lee sin lanzar ningún proceso.
+    private static long readResidentUsageFromProc(long pid) {
+        Path status = Path.of("/proc", String.valueOf(pid), "status");
+        if (!Files.isRegularFile(status)) {
+            return -1L;
+        }
+        try {
+            for (String line : Files.readAllLines(status, StandardCharsets.UTF_8)) {
+                if (line.startsWith("VmRSS:")) {
+                    String[] parts = line.substring("VmRSS:".length()).trim().split("\\s+");
+                    return Math.round(Long.parseLong(parts[0]) / 1024d);
+                }
+            }
+        } catch (IOException | RuntimeException ignored) {
+        }
+        return -1L;
     }
 
     private static String ejecutarComando(List<String> command, long timeoutMs) {
@@ -2814,6 +2921,9 @@ public class PanelEstadisticas extends JPanel {
     private record DiskActivitySample(double percent, long readBytesPerSec, long writeBytesPerSec) {
     }
 
+    private record TimedValue<T>(T value, long atMillis) {
+    }
+
     private record ProcessMetricsSample(double cpuPercent, DiskActivitySample diskSample) {
         private ProcessMetricsSample {
             diskSample = diskSample != null ? diskSample : new DiskActivitySample(0d, 0L, 0L);
@@ -3370,6 +3480,10 @@ public class PanelEstadisticas extends JPanel {
     }
 
     private static void sampleActiveServers() {
+        // Las cachés van por PID; las de procesos que ya terminaron se descartan solas.
+        long staleBefore = System.currentTimeMillis() - 12 * EXPENSIVE_SAMPLE_INTERVAL_MS;
+        RAM_SAMPLE_CACHE_BY_PID.values().removeIf(cached -> cached.atMillis() < staleBefore);
+        METRICS_SAMPLE_CACHE_BY_PID.values().removeIf(cached -> cached.atMillis() < staleBefore);
         for (GestorServidores gestor : REGISTERED_GESTORES) {
             if (gestor == null || gestor.getListaServidores() == null) {
                 continue;
@@ -3425,7 +3539,15 @@ public class PanelEstadisticas extends JPanel {
         }
         String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (osName.contains("win")) {
-            return readWindowsProcessMetrics(process.pid());
+            long rootPid = process.pid();
+            long now = System.currentTimeMillis();
+            TimedValue<ProcessMetricsSample> cached = METRICS_SAMPLE_CACHE_BY_PID.get(rootPid);
+            if (cached != null && now - cached.atMillis() < EXPENSIVE_SAMPLE_INTERVAL_MS) {
+                return cached.value();
+            }
+            ProcessMetricsSample sample = readWindowsProcessMetrics(resolveServerJvm(process).pid());
+            METRICS_SAMPLE_CACHE_BY_PID.put(rootPid, new TimedValue<>(sample, now));
+            return sample;
         }
         return new ProcessMetricsSample(0d, new DiskActivitySample(0d, 0L, 0L));
     }
@@ -3445,7 +3567,7 @@ public class PanelEstadisticas extends JPanel {
         long wallClockNanos = System.nanoTime();
 
         try {
-            java.time.Duration totalCpuDuration = process.toHandle().info().totalCpuDuration().orElse(null);
+            java.time.Duration totalCpuDuration = resolveServerJvm(process).info().totalCpuDuration().orElse(null);
             if (totalCpuDuration == null) {
                 return history != null ? history.lastCpuPercent() : 0d;
             }
@@ -3488,6 +3610,11 @@ public class PanelEstadisticas extends JPanel {
     }
 
     private static void removeCpuSampleState(Server server, Process process) {
+        if (process != null) {
+            RAM_SAMPLE_CACHE_BY_PID.remove(process.pid());
+            METRICS_SAMPLE_CACHE_BY_PID.remove(process.pid());
+            JSTAT_FAILURES_BY_PID.remove(process.pid());
+        }
         if (server != null && server.getId() != null && !server.getId().isBlank()) {
             CPU_SAMPLE_STATE_BY_SERVER.remove(server.getId());
             return;
