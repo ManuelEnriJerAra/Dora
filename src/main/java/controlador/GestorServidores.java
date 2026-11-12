@@ -29,6 +29,7 @@ import controlador.extensions.ServerExtensionsService;
 import modelo.Server;
 import modelo.ServerConfig;
 import modelo.automation.ServerAutomationRule;
+import controlador.platform.JavaRuntimeCompatibility;
 import controlador.platform.ServerInstallationRequest;
 import controlador.platform.ServerCreationOption;
 import controlador.platform.FileDownloader;
@@ -2998,6 +2999,9 @@ public class GestorServidores {
     }
 
     public void iniciarServidor(Server server) throws IOException {
+        if (!confirmarCompatibilidadJava(server)) {
+            return;
+        }
         Integer puertoElegido = null;
         while (true) {
             SolicitudPuertoInicio solicitud;
@@ -3020,6 +3024,57 @@ public class GestorServidores {
                 return;
             }
         }
+    }
+
+    // Servidores para los que el usuario ya ha aceptado el aviso de Java en esta sesión.
+    private final Set<String> avisoJavaAceptado = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    // Avisa si la versión de Minecraft del servidor no encaja con el Java del sistema (el que usan los arranques).
+    // Devuelve false si el usuario cancela el inicio. Se llama fuera de inicioLock porque puede mostrar un diálogo.
+    private boolean confirmarCompatibilidadJava(Server server) {
+        if (server == null || (server.getServerProcess() != null && server.getServerProcess().isAlive())) {
+            return true;
+        }
+        String aviso;
+        try {
+            aviso = JavaRuntimeCompatibility.warningFor(
+                    server.getVersion(),
+                    server.getPlatform() == ServerPlatform.FORGE,
+                    JavaRuntimeCompatibility.detectPathJavaMajor()
+            );
+        } catch (RuntimeException e) {
+            return true;
+        }
+        if (aviso == null) {
+            return true;
+        }
+        server.appendConsoleLinea("[WARN] " + aviso);
+        String clave = server.getId() == null ? server.getServerDir() : server.getId();
+        // Arranques automáticos o sin interfaz: solo el aviso en consola.
+        if (GraphicsEnvironment.isHeadless() || !SwingUtilities.isEventDispatchThread()
+                || (clave != null && avisoJavaAceptado.contains(clave))) {
+            return true;
+        }
+        Window owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+        Object[] opciones = {"Iniciar igualmente", "Cancelar"};
+        int respuesta = JOptionPane.showOptionDialog(
+                owner,
+                aviso + "\n\nDora usa el Java instalado en el sistema para arrancar los servidores.",
+                "Versión de Java",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                opciones,
+                opciones[1]
+        );
+        if (respuesta != 0) {
+            server.appendConsoleLinea("[INFO] Inicio cancelado por la versión de Java.");
+            return false;
+        }
+        if (clave != null) {
+            avisoJavaAceptado.add(clave);
+        }
+        return true;
     }
 
     // Devuelve una solicitud de puerto si hay que preguntar al usuario; null si ha terminado (arrancado o fallido).

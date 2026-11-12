@@ -56,6 +56,8 @@ Forge/NeoForge/Quilt may use generated argument files or special launch paths.
 
 Starting is serialized by `GestorServidores.inicioLock`, not by `synchronized` on the manager. The lock is released while the "port busy" dialog is open: a background thread (automation, restart after exit) that held the lock while waiting on the EDT would freeze the app as soon as the EDT tried to start another server. Ports of other servers Dora is already running count as busy, because a freshly launched server takes a few seconds to bind its port.
 
+Before taking the lock, `iniciarServidor` compares the server's Minecraft version with the system `java` (`controlador.platform.JavaRuntimeCompatibility`). A mismatch is logged as `[WARN]`; manual starts also get a dialog once per server per session.
+
 ## Stop And Command Pipeline
 
 Commands are written to the running process input stream.
