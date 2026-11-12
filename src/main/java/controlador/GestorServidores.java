@@ -2986,11 +2986,48 @@ public class GestorServidores {
 
     // ===== MÉTODOS DE CONTROL DEL SERVIDOR =====
 
-    public synchronized void iniciarServidor(Server server) throws IOException {
+    // Cerrojo de arranque: evita dobles arranques y que dos servidores elijan el mismo puerto.
+    // No se mantiene mientras se muestra un diálogo: si un hilo de fondo (automatizaciones,
+    // reinicio) lo tuviera esperando al EDT y el EDT intentara arrancar otro servidor, la app se congelaría.
+    private final Object inicioLock = new Object();
+
+    private record SolicitudPuertoInicio(String bindHost,
+                                         int puertoOcupado,
+                                         boolean puertoDefectoDisponible,
+                                         int puertoRecomendado) {
+    }
+
+    public void iniciarServidor(Server server) throws IOException {
+        Integer puertoElegido = null;
+        while (true) {
+            SolicitudPuertoInicio solicitud;
+            synchronized (inicioLock) {
+                solicitud = iniciarServidorBloqueado(server, puertoElegido);
+            }
+            if (solicitud == null) {
+                return;
+            }
+            // El puerto está ocupado: preguntamos al usuario fuera del cerrojo.
+            puertoElegido = solicitarPuertoAlternativo(
+                    server,
+                    solicitud.bindHost(),
+                    solicitud.puertoOcupado(),
+                    solicitud.puertoDefectoDisponible(),
+                    solicitud.puertoRecomendado()
+            );
+            if (puertoElegido == null) {
+                server.appendConsoleLinea("[INFO] Inicio cancelado por selección de puerto.");
+                return;
+            }
+        }
+    }
+
+    // Devuelve una solicitud de puerto si hay que preguntar al usuario; null si ha terminado (arrancado o fallido).
+    private SolicitudPuertoInicio iniciarServidorBloqueado(Server server, Integer puertoElegido) throws IOException {
         // Compruebo si está en marcha, si no, prosigo
         if(server.getServerProcess()!=null && server.getServerProcess().isAlive()) {
             server.appendConsoleLinea("[INFO] El servidor ya está iniciado. ");
-            return;
+            return null;
         }
         Path dir = Path.of(server.getServerDir());
         try {
@@ -3005,25 +3042,24 @@ public class GestorServidores {
             jar = adapter.resolveExecutableJar(dir);
         } catch (RuntimeException e) {
             server.appendConsoleLinea("[ERROR] No se ha podido encontrar el .jar del servidor: " + e.getMessage());
-            return;
+            return null;
         } catch (IOException e) {
             server.appendConsoleLinea("[ERROR] No se ha podido resolver el .jar del servidor: " + e.getMessage());
-            return;
+            return null;
         }
         if (jar == null && adapter.requiresExecutableJarForStart()) {
             server.appendConsoleLinea("[ERROR] No se ha podido encontrar el .jar del servidor.");
-            return;
+            return null;
         }
 
         // Creo un proceso con la dirección del servidor y la RAM elegida y en el primer puerto que esté libre desde 25565
         ServerConfig serverConfig = asegurarServerConfig(server);
         sincronizarPuertoConfigDesdeProperties(server);
-        Integer puertoSeleccionado = resolverPuertoParaInicio(server, serverConfig);
-        if (puertoSeleccionado == null) {
-            server.appendConsoleLinea("[INFO] Inicio cancelado por selección de puerto.");
-            return;
+        Object resolucionPuerto = resolverPuertoParaInicio(server, serverConfig, puertoElegido);
+        if (resolucionPuerto instanceof SolicitudPuertoInicio solicitud) {
+            return solicitud;
         }
-        int puerto = puertoSeleccionado;
+        int puerto = (Integer) resolucionPuerto;
         if(puerto != serverConfig.getPuerto()){
             // si el puerto no está libre pasamos al siguiente
             serverConfig.setPuerto(puerto);
@@ -3042,7 +3078,7 @@ public class GestorServidores {
             pb = adapter.buildStartProcess(server, jar);
         } catch (RuntimeException e) {
             server.appendConsoleLinea("[ERROR] No se ha podido preparar el arranque del servidor: " + e.getMessage());
-            return;
+            return null;
         }
         server.appendConsoleLinea("[INFO] Iniciando servidor con "+serverConfig.getRamInit()+"M y "+serverConfig.getRamMax()+"M de RAM.");
 
@@ -3087,6 +3123,7 @@ public class GestorServidores {
             server.appendConsoleLinea("[ERROR] El servidor no se pudo iniciar"+e.getMessage());
             AppErrorReporter.report("El proceso del servidor no se pudo iniciar.", e);
         }
+        return null;
     }
 
     // Eliminar el proceso de servidor, a evitar, puede provocar corrupción de mundos
@@ -3202,35 +3239,49 @@ public class GestorServidores {
         return serverConfig;
     }
 
-    private Integer resolverPuertoParaInicio(Server server, ServerConfig serverConfig) {
-        int puertoGuardado = puertoConfigurado(serverConfig);
+    // Devuelve el puerto (Integer) a usar o una SolicitudPuertoInicio si hay que preguntar al usuario.
+    // Debe llamarse con inicioLock tomado.
+    private Object resolverPuertoParaInicio(Server server, ServerConfig serverConfig, Integer puertoElegido) {
         String bindHost = resolveServerBindHost(server);
+        Set<Integer> reservados = puertosDeOtrosServidoresActivos(server);
+        int puertoObjetivo = puertoElegido != null ? puertoElegido : puertoConfigurado(serverConfig);
 
-        if (isPortAvailable(bindHost, puertoGuardado)) {
-            probarSiguientePuerto(puertoGuardado);
-            return puertoGuardado;
+        if (isPortAvailableForStart(bindHost, puertoObjetivo, reservados)) {
+            probarSiguientePuerto(puertoObjetivo);
+            return puertoObjetivo;
         }
 
-        Integer siguientePuerto = buscarSiguientePuertoDisponible(bindHost, puertoGuardado + 1);
+        Integer siguientePuerto = null;
+        for (int p = Math.max(1, puertoObjetivo + 1); p <= PUERTO_MAXIMO; p++) {
+            if (isPortAvailableForStart(bindHost, p, reservados)) {
+                siguientePuerto = p;
+                break;
+            }
+        }
         if (siguientePuerto == null) {
-            throw new RuntimeException("No hay puertos disponibles entre " + Math.max(1, puertoGuardado + 1) + " y 65535");
+            throw new RuntimeException("No hay puertos disponibles entre " + Math.max(1, puertoObjetivo + 1) + " y 65535");
         }
-
-        Integer puertoElegido = solicitarPuertoAlternativo(
-                server,
+        return new SolicitudPuertoInicio(
                 bindHost,
-                puertoGuardado,
-                isPortAvailable(bindHost, PUERTO_MINECRAFT_DEFECTO),
+                puertoObjetivo,
+                isPortAvailableForStart(bindHost, PUERTO_MINECRAFT_DEFECTO, reservados),
                 siguientePuerto
         );
-        if (puertoElegido != null) {
-            probarSiguientePuerto(puertoElegido);
-        }
-        return puertoElegido;
     }
 
-    private Integer resolverPuertoParaInicio(Server server) {
-        return resolverPuertoParaInicio(server, asegurarServerConfig(server));
+    // Un servidor recién lanzado tarda unos segundos en abrir su puerto y, hasta entonces, el puerto parece libre.
+    // Tratamos como ocupados los puertos de los demás servidores que Dora tiene en marcha.
+    private Set<Integer> puertosDeOtrosServidoresActivos(Server server) {
+        Set<Integer> puertos = new HashSet<>();
+        for (Server otro : getServidoresActivos()) {
+            if (otro == server || otro.getServerConfig() == null) continue;
+            puertos.add(otro.getServerConfig().getPuerto());
+        }
+        return puertos;
+    }
+
+    private static boolean isPortAvailableForStart(String bindHost, int port, Set<Integer> reservados) {
+        return !reservados.contains(port) && isPortAvailable(bindHost, port);
     }
 
     private int puertoConfigurado(ServerConfig serverConfig) {

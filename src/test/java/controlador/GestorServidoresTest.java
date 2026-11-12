@@ -1948,6 +1948,31 @@ class GestorServidoresTest {
         assertThat(gestor.getListaServidores()).extracting(Server::getId).contains(server.getId());
     }
 
+    @Test
+    void iniciarServidor_noReutilizaElPuertoDeOtroServidorQueSigueArrancando() throws Exception {
+        GestorServidores gestor = new GestorServidores(tempDir.resolve("dora-server-list.json").toFile());
+        int puerto;
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            puerto = socket.getLocalPort();
+        }
+        // El otro servidor ya está lanzado pero todavía no ha abierto el puerto: el puerto parece libre.
+        Server arrancando = modpackServer("start-port-other");
+        arrancando.setServerConfig(new modelo.ServerConfig(1024, 2048, puerto));
+        gestor.guardarServidor(arrancando);
+        arrancando.setServerProcess(new FakeProcess(true));
+
+        Server nuevo = modpackServer("start-port-reserved");
+        nuevo.setServerConfig(new modelo.ServerConfig(1024, 2048, puerto));
+        Files.writeString(Path.of(nuevo.getServerDir()).resolve("server.properties"), "server-port=" + puerto + "\n");
+        gestor.guardarServidor(nuevo);
+
+        gestor.iniciarServidor(nuevo);
+
+        // Sin interfaz no se puede elegir otro puerto, así que el arranque se cancela en vez de chocar.
+        assertThat(nuevo.getServerProcess()).isNull();
+        assertThat(nuevo.getConsoleText()).contains("Inicio cancelado por selección de puerto.");
+    }
+
     private Server modpackServer(String name) throws Exception {
         Path serverDir = tempDir.resolve(name);
         TestWorldFixtures.createValidServerJar(
