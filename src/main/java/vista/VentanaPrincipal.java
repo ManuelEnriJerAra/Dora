@@ -111,6 +111,9 @@ public class VentanaPrincipal extends JFrame {
         this.setSize(1280, 720);
         actualizarTituloDebug();
         configurarIconoVentana();
+        // Registrar siempre el muestreo de recursos: si depende de la bandeja,
+        // en sistemas sin bandeja (muchos escritorios Linux) CPU/RAM se quedan en 0%.
+        PanelEstadisticas.registrarGestorParaMuestras(gestorServidores);
         instalarBandejaSistema();
         this.setLocationRelativeTo(null);
         debugModeListener = evt -> {
@@ -1148,7 +1151,6 @@ public class VentanaPrincipal extends JFrame {
             trayServerStateListener = evt -> EventQueue.invokeLater(this::actualizarMenuBandeja);
             gestorServidores.addPropertyChangeListener("estadoServidor", trayServerStateListener);
             gestorServidores.addPropertyChangeListener("listaServidores", trayServerStateListener);
-            PanelEstadisticas.registrarGestorParaMuestras(gestorServidores);
             actualizarMenuBandeja();
             SystemTray.getSystemTray().add(trayIcon);
             trayDisponible = true;
