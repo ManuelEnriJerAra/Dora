@@ -96,6 +96,12 @@ public final class VanillaServerPlatformAdapter extends AbstractServerPlatformAd
         Path destinationJar = request.targetDirectory().resolve(request.minecraftVersion() + "_server.jar");
         if (!Files.isRegularFile(destinationJar)) {
             downloader.download(url, destinationJar.toFile());
+            DownloadChecksum.verifyOrDelete(
+                    destinationJar,
+                    "SHA-1",
+                    api.obtenerSha1ServerJar(request.minecraftVersion()),
+                    "Minecraft " + request.minecraftVersion()
+            );
         }
 
         ServerPlatformInstallSupport.prepareCommonFiles(

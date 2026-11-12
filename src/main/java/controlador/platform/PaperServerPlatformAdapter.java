@@ -83,6 +83,7 @@ public final class PaperServerPlatformAdapter extends AbstractServerPlatformAdap
         Path destinationJar = request.targetDirectory().resolve("paper-" + request.minecraftVersion() + "-" + build.id() + ".jar");
         if (!Files.isRegularFile(destinationJar)) {
             request.downloader().download(build.downloadUrl(), destinationJar.toFile());
+            DownloadChecksum.verifyOrDelete(destinationJar, "SHA-256", build.sha256(), "Paper " + request.minecraftVersion());
         }
         ServerPlatformInstallSupport.prepareCommonFiles(
                 server,

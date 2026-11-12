@@ -81,6 +81,12 @@ public final class PurpurServerPlatformAdapter extends AbstractServerPlatformAda
         Path destinationJar = request.targetDirectory().resolve("purpur-" + request.minecraftVersion() + "-" + request.platformVersion() + ".jar");
         if (!Files.isRegularFile(destinationJar)) {
             request.downloader().download(downloadUrl, destinationJar.toFile());
+            DownloadChecksum.verifyOrDelete(
+                    destinationJar,
+                    "MD5",
+                    downloadsClient.md5(request.minecraftVersion(), request.platformVersion()),
+                    "Purpur " + request.minecraftVersion()
+            );
         }
         ServerPlatformInstallSupport.prepareCommonFiles(
                 server,
