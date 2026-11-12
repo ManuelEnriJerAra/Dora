@@ -21,6 +21,8 @@ Before changing serialized fields, check existing config compatibility and defau
 
 `modelo.ServerProperties` represents `server.properties` style values.
 
+Read and write `server.properties` only through `Utilidades.cargarPropertiesUtf8(...)` and `Utilidades.guardarPropertiesUtf8(...)`. The loader accepts UTF-8 and falls back to ISO-8859-1 for hand-edited ANSI files; the writer is atomic. Never continue with an empty `Properties` after a failed read and then save: that replaces the user's file with an almost empty one. `escribirPuertoEnProperties` and `escribirMotdEnProperties` throw instead of writing when the existing file cannot be read.
+
 `vista.PanelConfigServidor` provides the UI for editing server properties and runtime-related settings.
 
 Panel responsibilities:

@@ -106,6 +106,7 @@ public class GestorServidores {
     private static final int PUERTO_MAXIMO = 65535;
 
     private static final String JSON_FILE = "dora-server-list.json";
+    private static final String MODPACK_BACKUP_DIR = ".dora-backup";
 
     private static File getJsonFile() {
         return AppPaths.configDirectory().resolve(JSON_FILE).toFile();
@@ -121,9 +122,13 @@ public class GestorServidores {
     private ServerAutomationService automationService;
 
     private String avisoServidoresNoCargados;
+    private String avisoListaServidoresIlegible;
 
     // Lista Principal (runtime + persistencia)
     private List<Server> listaServidores;
+    // Servidores guardados cuya carpeta no está disponible ahora mismo (disco externo desconectado, carpeta de red...).
+    // No se muestran, pero se conservan en el JSON para no perder su configuración y volver a cargarlos más adelante.
+    private final List<Server> servidoresNoDisponibles = new ArrayList<>();
     private Server servidorSeleccionado;
 
     // Esto gestiona los listeners
@@ -194,17 +199,50 @@ public class GestorServidores {
                 if (parent != null) {
                     Files.createDirectories(parent.toPath());
                 }
-                mapper.writerWithDefaultPrettyPrinter().writeValue(file, servidores);
+                Utilidades.escribirArchivoAtomico(
+                        file.toPath(),
+                        mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(servidores)
+                );
             } catch (Exception e) {
                 System.err.println("Error al inicializar servidores: " + e.getMessage());
             }
             return servidores;
         }
         try{
-            return mapper.readValue(file, new TypeReference<>(){});
+            List<Server> servidores = mapper.readValue(file, new TypeReference<>(){});
+            return servidores == null ? new ArrayList<>() : new ArrayList<>(servidores);
         } catch (JacksonException e) {
             System.err.println("Error al cargar servidores: " + e.getMessage());
+            // El siguiente guardado sobrescribiría el archivo ilegible, así que antes dejamos una copia recuperable.
+            Path copia = respaldarArchivoIlegible(file.toPath());
+            avisoListaServidoresIlegible = "No se ha podido leer " + JSON_FILE + " porque su contenido no es válido."
+                    + "\nDora empezará con la lista de servidores vacía."
+                    + (copia == null
+                    ? "\nNo se ha podido crear una copia de seguridad del archivo."
+                    : "\nSe ha guardado una copia del archivo original en:\n" + copia);
+            AppErrorReporter.report("No se ha podido leer " + JSON_FILE + ".", e);
             return new ArrayList<>();
+        }
+    }
+
+    // Copia un archivo de datos ilegible a un nombre único para que no se pierda al volver a guardar.
+    static Path respaldarArchivoIlegible(Path archivo) {
+        if (archivo == null || !Files.isRegularFile(archivo)) {
+            return null;
+        }
+        try {
+            String marca = java.time.LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+            Path copia = archivo.resolveSibling(archivo.getFileName() + ".corrupt-" + marca);
+            int intento = 1;
+            while (Files.exists(copia)) {
+                copia = archivo.resolveSibling(archivo.getFileName() + ".corrupt-" + marca + "-" + intento++);
+            }
+            Files.copy(archivo, copia);
+            return copia;
+        } catch (IOException | RuntimeException ex) {
+            System.err.println("No se ha podido respaldar " + archivo + ": " + ex.getMessage());
+            return null;
         }
     }
 
@@ -736,14 +774,20 @@ public class GestorServidores {
             }
             tasks.add(new ModpackDownloadTask(plan, extensionDownloader));
         }
+        ModpackReplaceBackup backup = null;
         if (conflictPolicy == ModpackImportConflictPolicy.REPLACE_EXISTING) {
             validarTareasModpackAntesDeReemplazar(tasks);
-            eliminarJarsGestionadosParaReemplazoModpack(server, warnings);
+            backup = apartarJarsGestionadosParaReemplazoModpack(server);
         }
-        for (ModpackDownloadTask task : tasks) {
-            serverExtensionsService.installCatalogDownload(server, task.plan(), task.downloader());
-            installed++;
+        try {
+            for (ModpackDownloadTask task : tasks) {
+                serverExtensionsService.installCatalogDownload(server, task.plan(), task.downloader());
+                installed++;
+            }
+        } catch (IOException | RuntimeException ex) {
+            throw restaurarModsTrasFalloDeModpack(server, backup, ex, true);
         }
+        confirmarReemplazoModpack(backup, warnings);
         serverExtensionsService.persistInstalledExtensionCache(server);
         guardarServidor(server);
         return installed;
@@ -836,14 +880,20 @@ public class GestorServidores {
                         (url, destination) -> modrinthModpackService.downloadAndVerify(file, url, destination, extensionDownloader)
                 ));
             }
+            ModpackReplaceBackup backup = null;
             if (conflictPolicy == ModpackImportConflictPolicy.REPLACE_EXISTING) {
                 validarTareasModpackAntesDeReemplazar(tasks);
-                eliminarJarsGestionadosParaReemplazoModpack(server, warnings);
+                backup = apartarJarsGestionadosParaReemplazoModpack(server);
             }
-            for (ModpackDownloadTask task : tasks) {
-                serverExtensionsService.installCatalogDownload(server, task.plan(), task.downloader());
-                installed++;
+            try {
+                for (ModpackDownloadTask task : tasks) {
+                    serverExtensionsService.installCatalogDownload(server, task.plan(), task.downloader());
+                    installed++;
+                }
+            } catch (IOException | RuntimeException ex) {
+                throw restaurarModsTrasFalloDeModpack(server, backup, ex, true);
             }
+            confirmarReemplazoModpack(backup, warnings);
             int overrides = modrinthModpackService.extractOverrides(sourcePack, server, options, warnings);
             if (overrides > 0 && warnings != null) {
                 warnings.add("Se han extraído " + overrides + " archivos de override compatibles.");
@@ -958,7 +1008,9 @@ public class GestorServidores {
         }
     }
 
-    private void eliminarJarsGestionadosParaReemplazoModpack(Server server, List<String> warnings) throws IOException {
+    // Aparta los mods actuales a una carpeta de respaldo en lugar de borrarlos: si la importación falla
+    // a medias (red, hash, API) se pueden restaurar y el servidor no se queda con medio modpack.
+    private ModpackReplaceBackup apartarJarsGestionadosParaReemplazoModpack(Server server) throws IOException {
         if (server == null) {
             throw new IOException("No se ha indicado el servidor.");
         }
@@ -983,25 +1035,138 @@ public class GestorServidores {
             try (Stream<Path> children = Files.list(extensionDir)) {
                 jars.addAll(children
                         .filter(path -> esJarGestionadoSeguro(normalizedServerDir, normalizedExtensionDir, path))
+                        .map(path -> path.toAbsolutePath().normalize())
                         .sorted(Comparator.comparing(path -> path.getFileName().toString(), String.CASE_INSENSITIVE_ORDER))
                         .toList());
             }
         }
-        for (Path jar : jars) {
-            try {
-                Files.delete(jar);
-            } catch (IOException ex) {
-                throw new IOException("No se ha podido eliminar el mod actual " + jar.getFileName()
-                        + ". Detén el servidor y cierra cualquier programa que esté usando ese archivo.", ex);
+
+        List<ServerExtension> previousExtensions = server.getExtensions() == null
+                ? new ArrayList<>()
+                : new ArrayList<>(server.getExtensions());
+        String marca = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        Path backupDir = normalizedServerDir.resolve(MODPACK_BACKUP_DIR).resolve("mods-" + marca + "-" + UUID.randomUUID().toString().substring(0, 8));
+        ModpackReplaceBackup backup = new ModpackReplaceBackup(
+                backupDir,
+                normalizedServerDir,
+                new ArrayList<>(),
+                previousExtensions,
+                List.copyOf(extensionDirs)
+        );
+        try {
+            for (Path jar : jars) {
+                Path respaldo = backupDir.resolve(normalizedServerDir.relativize(jar));
+                Files.createDirectories(respaldo.getParent());
+                try {
+                    Files.move(jar, respaldo);
+                } catch (IOException ex) {
+                    throw new IOException("No se ha podido apartar el mod actual " + jar.getFileName()
+                            + ". Detén el servidor y cierra cualquier programa que esté usando ese archivo.", ex);
+                }
+                backup.movedJars().add(jar);
             }
+        } catch (IOException | RuntimeException ex) {
+            // Nada se ha instalado todavía: solo devolvemos a su sitio lo que ya se hubiera movido,
+            // sin borrar los jars que siguen en la carpeta (son los originales que no llegaron a moverse).
+            throw restaurarModsTrasFalloDeModpack(server, backup, ex, false);
         }
         server.setExtensions(serverExtensionsService.detectInstalledExtensions(server));
         serverExtensionsService.persistInstalledExtensionCache(server);
-        if (!jars.isEmpty() && warnings != null) {
-            warnings.add("Se han eliminado " + jars.size() + (jars.size() == 1
+        return backup;
+    }
+
+    // La importación ha terminado bien: ya no hace falta el respaldo de los mods anteriores.
+    private void confirmarReemplazoModpack(ModpackReplaceBackup backup, List<String> warnings) {
+        if (backup == null) {
+            return;
+        }
+        int total = backup.movedJars().size();
+        try {
+            FileSystemSafety.deleteDirectoryTree(backup.backupDir());
+            Path parent = backup.backupDir().getParent();
+            if (parent != null && Files.isDirectory(parent)) {
+                try (Stream<Path> remaining = Files.list(parent)) {
+                    if (remaining.findAny().isEmpty()) {
+                        Files.deleteIfExists(parent);
+                    }
+                }
+            }
+        } catch (IOException | RuntimeException ex) {
+            if (warnings != null) {
+                warnings.add("No se ha podido borrar el respaldo temporal de los mods anteriores: " + backup.backupDir());
+            }
+        }
+        if (total > 0 && warnings != null) {
+            warnings.add("Se han eliminado " + total + (total == 1
                     ? " mod actual antes de importar el modpack."
                     : " mods actuales antes de importar el modpack."));
         }
+    }
+
+    // Deshace un reemplazo fallido: quita lo instalado a medias y devuelve los mods anteriores a su sitio.
+    // Devuelve la excepción que debe relanzarse, con el contexto de la restauración.
+    private IOException restaurarModsTrasFalloDeModpack(Server server,
+                                                        ModpackReplaceBackup backup,
+                                                        Exception cause,
+                                                        boolean borrarInstaladosParciales) {
+        IOException original = cause instanceof IOException io
+                ? io
+                : new IOException(firstNonBlank(cause.getMessage(), "Error inesperado al importar el modpack."), cause);
+        if (backup == null) {
+            return original;
+        }
+        try {
+            for (Path extensionDir : borrarInstaladosParciales ? backup.extensionDirs() : List.<Path>of()) {
+                if (extensionDir == null || !Files.isDirectory(extensionDir)) {
+                    continue;
+                }
+                Path normalizedExtensionDir = extensionDir.toAbsolutePath().normalize();
+                List<Path> parciales;
+                try (Stream<Path> children = Files.list(extensionDir)) {
+                    parciales = children
+                            .filter(path -> esJarGestionadoSeguro(backup.serverDir(), normalizedExtensionDir, path))
+                            .toList();
+                }
+                for (Path parcial : parciales) {
+                    Files.deleteIfExists(parcial);
+                }
+            }
+            for (Path jar : backup.movedJars()) {
+                Path respaldo = backup.backupDir().resolve(backup.serverDir().relativize(jar));
+                if (Files.isRegularFile(respaldo, LinkOption.NOFOLLOW_LINKS)) {
+                    Files.createDirectories(jar.getParent());
+                    Files.move(respaldo, jar, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            FileSystemSafety.deleteDirectoryTree(backup.backupDir());
+            Path parent = backup.backupDir().getParent();
+            if (parent != null && Files.isDirectory(parent)) {
+                try (Stream<Path> remaining = Files.list(parent)) {
+                    if (remaining.findAny().isEmpty()) {
+                        Files.deleteIfExists(parent);
+                    }
+                }
+            }
+            server.setExtensions(new ArrayList<>(backup.previousExtensions()));
+            server.setExtensions(serverExtensionsService.detectInstalledExtensions(server));
+            serverExtensionsService.persistInstalledExtensionCache(server);
+            return new IOException(firstNonBlank(original.getMessage(), "La importación del modpack ha fallado.")
+                    + "\nNo se ha cambiado nada: se han restaurado los mods que había antes de importar.", original);
+        } catch (IOException | RuntimeException restoreFailure) {
+            IOException failure = new IOException(firstNonBlank(original.getMessage(), "La importación del modpack ha fallado.")
+                    + "\nAdemás, no se han podido restaurar todos los mods anteriores. Siguen guardados en: "
+                    + backup.backupDir(), original);
+            failure.addSuppressed(restoreFailure);
+            return failure;
+        }
+    }
+
+    private record ModpackReplaceBackup(Path backupDir,
+                                        Path serverDir,
+                                        List<Path> movedJars,
+                                        List<ServerExtension> previousExtensions,
+                                        List<Path> extensionDirs) {
     }
 
     private boolean esJarGestionadoSeguro(Path normalizedServerDir, Path normalizedExtensionDir, Path path) {
@@ -1058,16 +1223,30 @@ public class GestorServidores {
 
     // esta función de encarga de comprobar si los servidores almacenados son correctos, si no lo son se eliminan
     private void validarYLimpiarServidoresPersistidos() {
-        if (listaServidores == null || listaServidores.isEmpty()) return;
+        if ((listaServidores == null || listaServidores.isEmpty()) && servidoresNoDisponibles.isEmpty()) return;
+
+        // Revisamos también los que no estaban disponibles: puede que su carpeta haya vuelto.
+        List<Server> candidatos = new ArrayList<>();
+        if (listaServidores != null) {
+            candidatos.addAll(listaServidores);
+        }
+        candidatos.addAll(servidoresNoDisponibles);
+        Set<String> idsNoDisponiblesAntes = new HashSet<>();
+        for (Server server : servidoresNoDisponibles) {
+            if (server != null && server.getId() != null) {
+                idsNoDisponiblesAntes.add(server.getId());
+            }
+        }
 
         List<Server> cargables = new ArrayList<>(); // aquí almacenamos los correctos
-        List<Server> noCargables = new ArrayList<>(); // aquí almacenamos los que vamos a borrar
+        List<Server> noCargables = new ArrayList<>(); // aquí almacenamos los que no se pueden mostrar ahora
 
         // si han ocurrido cambios se los notificaremos al usuario
         boolean cambios = false;
 
-        for (Server server : listaServidores) {
-            // si el servidor no es cargable lo ignoramos y añadimos a noCargables
+        for (Server server : candidatos) {
+            if (server == null) continue;
+            // si el servidor no es cargable lo apartamos en noCargables, pero NO lo borramos del JSON
             if (esServidorCargable(server)) {
                 try {
                     ServerPlatformProfile profile = inspeccionarServidor(Path.of(server.getServerDir()));
@@ -1084,41 +1263,63 @@ public class GestorServidores {
             }
         }
 
-        // si todos los servidores eran cargables ignoramos la revisión y no notificamos nada
+        List<Server> nuevosNoCargables = noCargables.stream()
+                .filter(server -> server.getId() == null || !idsNoDisponiblesAntes.contains(server.getId()))
+                .toList();
+        boolean recuperados = cargables.stream()
+                .anyMatch(server -> server.getId() != null && idsNoDisponiblesAntes.contains(server.getId()));
+
         listaServidores = cargables;
+        servidoresNoDisponibles.clear();
+        servidoresNoDisponibles.addAll(noCargables);
         if (normalizarMetadatosOrden(true)) {
             cambios = true;
         }
 
-        if (noCargables.isEmpty() && !cambios) return;
+        if (nuevosNoCargables.isEmpty() && !recuperados && !cambios) return;
 
         guardarServidores();
         notificarCambio();
 
-        if (noCargables.isEmpty()) return;
+        if (nuevosNoCargables.isEmpty()) return;
 
         StringBuilder sb = new StringBuilder();
         sb.append("No se han podido cargar ")
-                .append(noCargables.size())
+                .append(nuevosNoCargables.size())
                 .append(" servidores guardados (carpeta inexistente o servidor inválido).")
-                .append("\nNo se mostraran y se han eliminado de " + JSON_FILE + ".");
+                .append("\nNo se mostrarán, pero se conservan en " + JSON_FILE
+                        + " y volverán a aparecer cuando su carpeta esté disponible.");
 
         // mostramos un máximo de 8 servidores que no se han podido cargar
         int maxDetalles = 8;
         int mostrados = 0;
-        for (Server server : noCargables) {
-            if (server == null) continue;
+        for (Server server : nuevosNoCargables) {
             if (mostrados >= maxDetalles) break;
             String nombre = server.getDisplayName() == null ? "(sin nombre)" : server.getDisplayName();
             String dir = server.getServerDir() == null ? "(sin carpeta)" : server.getServerDir();
             sb.append("\n- ").append(nombre).append(" [").append(dir).append("]");
             mostrados++;
         }
-        if (noCargables.size() > maxDetalles) {
-            sb.append("\n... y ").append(noCargables.size() - maxDetalles).append(" más.");
+        if (nuevosNoCargables.size() > maxDetalles) {
+            sb.append("\n... y ").append(nuevosNoCargables.size() - maxDetalles).append(" más.");
         }
 
         avisoServidoresNoCargados = sb.toString();
+    }
+
+    // Servidores guardados que ahora mismo no se pueden cargar; siguen persistidos en el JSON.
+    public List<Server> getServidoresNoDisponibles() {
+        return List.copyOf(servidoresNoDisponibles);
+    }
+
+    // Olvida definitivamente un servidor no disponible (lo quita del JSON). No toca su carpeta.
+    public boolean olvidarServidorNoDisponible(String serverId) {
+        if (serverId == null) return false;
+        boolean removed = servidoresNoDisponibles.removeIf(server -> server != null && serverId.equals(server.getId()));
+        if (removed) {
+            guardarServidores();
+        }
+        return removed;
     }
 
     public void refrescarServidoresGuardados() {
@@ -1134,6 +1335,7 @@ public class GestorServidores {
 
     // Si hay servidores que no han podido ser cargados se notifica, si no, pasamos directamente al programa
     public void mostrarAvisoArranqueSiProcede(Component parent) {
+        mostrarAvisoListaIlegibleSiProcede(parent);
         if (avisoServidoresNoCargados == null || avisoServidoresNoCargados.isBlank()) return;
         String mensaje = avisoServidoresNoCargados;
         avisoServidoresNoCargados = null;
@@ -1143,6 +1345,26 @@ public class GestorServidores {
                 "Servidores no cargados",
                 JOptionPane.WARNING_MESSAGE
         ));
+    }
+
+    private void mostrarAvisoListaIlegibleSiProcede(Component parent) {
+        if (avisoListaServidoresIlegible == null || avisoListaServidoresIlegible.isBlank()) return;
+        String mensaje = avisoListaServidoresIlegible;
+        avisoListaServidoresIlegible = null;
+        if (GraphicsEnvironment.isHeadless()) {
+            System.err.println(mensaje);
+            return;
+        }
+        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
+                parent,
+                mensaje,
+                "Lista de servidores ilegible",
+                JOptionPane.ERROR_MESSAGE
+        ));
+    }
+
+    String getAvisoListaServidoresIlegible() {
+        return avisoListaServidoresIlegible;
     }
 
     // Consideramos "cargable" si hay exactamente un .jar y parece un server jar de Minecraft
@@ -2565,9 +2787,16 @@ public class GestorServidores {
             if (parent != null) {
                 Files.createDirectories(parent.toPath());
             }
-            mapper.writerWithDefaultPrettyPrinter().writeValue(jsonFile, copiarListaServidoresOrdenada());
+            // Los no disponibles se guardan también: solo están ocultos, no eliminados.
+            List<Server> persistidos = copiarListaServidoresOrdenada();
+            persistidos.addAll(servidoresNoDisponibles);
+            Utilidades.escribirArchivoAtomico(
+                    jsonFile.toPath(),
+                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(persistidos)
+            );
         } catch (Exception e) {
             System.err.println("Error al guardar servidores: " + e.getMessage());
+            AppErrorReporter.report("No se ha podido guardar " + JSON_FILE + ".", e);
         }
     }
 

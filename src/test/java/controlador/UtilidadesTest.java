@@ -10,6 +10,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class UtilidadesTest {
     @TempDir
@@ -64,6 +65,58 @@ class UtilidadesTest {
 
         assertThat(Utilidades.leerMotdDesdeProperties(serverDir)).isEqualTo("Hello world");
         assertThat(Files.readString(serverDir.resolve("server.properties"))).contains("server-port=25570");
+    }
+
+    @Test
+    void escribirPuerto_debeConservarPropertiesGuardadoEnLatin1() throws Exception {
+        Path serverDir = tempDir.resolve("latin1-server");
+        Files.createDirectories(serverDir);
+        Path properties = serverDir.resolve("server.properties");
+        // Un MOTD con tildes guardado desde un editor en ANSI/Latin-1 no es UTF-8 válido.
+        Files.write(properties, "motd=Servidor de Ram\u00F3n\nlevel-name=dora-worlds/mundo\nmax-players=42\nserver-port=25565\n"
+                .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+
+        Utilidades.escribirPuertoEnProperties(serverDir, 25570);
+
+        java.util.Properties result = Utilidades.cargarPropertiesUtf8(properties);
+        assertThat(result.getProperty("server-port")).isEqualTo("25570");
+        assertThat(result.getProperty("level-name")).isEqualTo("dora-worlds/mundo");
+        assertThat(result.getProperty("max-players")).isEqualTo("42");
+        assertThat(result.getProperty("motd")).isEqualTo("Servidor de Ram\u00F3n");
+    }
+
+    @Test
+    void escribirPuertoYMotd_noDebenSobrescribirPropertiesIlegible() throws Exception {
+        Path serverDir = tempDir.resolve("broken-server");
+        Files.createDirectories(serverDir);
+        Path properties = serverDir.resolve("server.properties");
+        String original = "level-name=dora-worlds/mundo\nmotd=\\uZZZZ roto\nmax-players=42\n";
+        Files.writeString(properties, original);
+
+        assertThatThrownBy(() -> Utilidades.escribirPuertoEnProperties(serverDir, 25570))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("server.properties");
+        assertThatThrownBy(() -> Utilidades.escribirMotdEnProperties(serverDir, "Hola"))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(Files.readString(properties)).isEqualTo(original);
+    }
+
+    @Test
+    void guardarPropertiesUtf8_debeReemplazarElArchivoSinDejarTemporales() throws Exception {
+        Path serverDir = tempDir.resolve("atomic-server");
+        Files.createDirectories(serverDir);
+        Path properties = serverDir.resolve("server.properties");
+        Files.writeString(properties, "motd=antes\n");
+        java.util.Properties values = new java.util.Properties();
+        values.setProperty("motd", "despu\u00E9s");
+
+        Utilidades.guardarPropertiesUtf8(properties, values, null);
+
+        assertThat(Utilidades.cargarPropertiesUtf8(properties).getProperty("motd")).isEqualTo("despu\u00E9s");
+        try (var files = Files.list(serverDir)) {
+            assertThat(files.map(path -> path.getFileName().toString()).toList()).containsExactly("server.properties");
+        }
     }
 
     @Test
