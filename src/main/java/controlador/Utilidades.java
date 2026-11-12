@@ -16,7 +16,11 @@ import javax.swing.filechooser.FileSystemView;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -158,12 +162,13 @@ public class Utilidades {
             throw new RuntimeException(e);
         }
 
-        Properties properties = new Properties();
-        if(Files.exists(propertiesPath)){
-            try{
-                properties = cargarPropertiesUtf8(propertiesPath);
-            } catch (IOException ignored){
-            }
+        // Si el archivo existe pero no se puede leer NO seguimos: guardar aquí lo sustituiría
+        // por uno casi vacío y se perdería toda la configuración del servidor.
+        Properties properties;
+        try{
+            properties = cargarPropertiesUtf8(propertiesPath);
+        } catch (IOException e){
+            throw new RuntimeException("No se ha podido leer server.properties, no se modificará: " + e.getMessage(), e);
         }
 
         properties.setProperty("server-port", String.valueOf(puerto));
@@ -186,12 +191,13 @@ public class Utilidades {
             throw new RuntimeException(e);
         }
 
-        Properties properties = new Properties();
-        if(Files.exists(propertiesPath)){
-            try{
-                properties = cargarPropertiesUtf8(propertiesPath);
-            } catch (IOException ignored){
-            }
+        // Si el archivo existe pero no se puede leer NO seguimos: guardar aquí lo sustituiría
+        // por uno casi vacío y se perdería toda la configuración del servidor.
+        Properties properties;
+        try{
+            properties = cargarPropertiesUtf8(propertiesPath);
+        } catch (IOException e){
+            throw new RuntimeException("No se ha podido leer server.properties, no se modificará: " + e.getMessage(), e);
         }
 
         properties.setProperty("motd", motd);
@@ -304,8 +310,25 @@ public class Utilidades {
         if(propertiesPath == null || !Files.isRegularFile(propertiesPath)) {
             return properties;
         }
-        try(Reader reader = Files.newBufferedReader(propertiesPath, StandardCharsets.UTF_8)){
+        byte[] bytes = Files.readAllBytes(propertiesPath);
+        String content;
+        try {
+            content = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+        } catch (CharacterCodingException e) {
+            // Archivos editados a mano en ANSI/Latin-1 (p. ej. un MOTD con tildes guardado desde el Bloc de notas).
+            content = new String(bytes, StandardCharsets.ISO_8859_1);
+        }
+        if(content.startsWith("\uFEFF")) {
+            content = content.substring(1);
+        }
+        try(Reader reader = new StringReader(content)){
             properties.load(reader);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("El archivo " + propertiesPath.getFileName() + " contiene secuencias no válidas.", e);
         }
         return properties;
     }
@@ -314,11 +337,34 @@ public class Utilidades {
         if(propertiesPath == null) {
             throw new IOException("La ruta de properties no es válida.");
         }
-        if(propertiesPath.getParent() != null) {
-            Files.createDirectories(propertiesPath.getParent());
+        StringWriter buffer = new StringWriter();
+        (properties == null ? new Properties() : properties).store(buffer, comments);
+        escribirArchivoAtomico(propertiesPath, buffer.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Escribe el contenido en un temporal junto al destino y lo mueve encima. Así un cierre inesperado
+     * a mitad de escritura nunca deja el archivo real truncado.
+     */
+    public static void escribirArchivoAtomico(Path destino, byte[] contenido) throws IOException {
+        if(destino == null) {
+            throw new IOException("La ruta de destino no es válida.");
         }
-        try(Writer writer = Files.newBufferedWriter(propertiesPath, StandardCharsets.UTF_8)){
-            (properties == null ? new Properties() : properties).store(writer, comments);
+        Path absoluto = destino.toAbsolutePath();
+        Path parent = absoluto.getParent();
+        if(parent != null) {
+            Files.createDirectories(parent);
+        }
+        Path temporal = Files.createTempFile(parent, absoluto.getFileName().toString() + ".", ".tmp");
+        try {
+            Files.write(temporal, contenido == null ? new byte[0] : contenido);
+            try {
+                Files.move(temporal, absoluto, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temporal, absoluto, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporal);
         }
     }
 

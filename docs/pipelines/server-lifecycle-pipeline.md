@@ -27,6 +27,12 @@ Typical responsibilities:
 
 Before changing persistence, inspect `GestorConfiguracion`, `DoraConfig`, `Server`, and tests in `GestorServidoresTest`.
 
+Persistence safety rules:
+
+- Write `dora-server-list.json` and `dora-config.json` through `Utilidades.escribirArchivoAtomico(...)` (temp file plus move), never directly onto the target file.
+- If a data file cannot be parsed, copy it to `<name>.corrupt-<timestamp>` with `GestorServidores.respaldarArchivoIlegible(...)` before continuing with defaults, and tell the user.
+- Saved servers that are not loadable right now (missing folder, unplugged drive, invalid jar) are hidden, not deleted: they move to `servidoresNoDisponibles`, stay in the JSON on every save, and return to the visible list when validation passes again. Only `olvidarServidorNoDisponible(...)` or `eliminarServidor(...)` removes an entry.
+
 ## Start Pipeline
 
 General sequence:

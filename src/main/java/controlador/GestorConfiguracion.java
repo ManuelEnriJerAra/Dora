@@ -44,6 +44,8 @@ public final class GestorConfiguracion {
             return config;
         } catch (JacksonException e) {
             System.err.println("Error al cargar " + JSON_FILE + ": " + e.getMessage());
+            // Guardamos una copia antes de restablecer los valores por defecto para no perder la configuración ilegible.
+            GestorServidores.respaldarArchivoIlegible(file.toPath());
             DoraConfig config = crearConfiguracionPorDefecto();
             guardarConfiguracion(config);
             return config;
@@ -79,11 +81,10 @@ public final class GestorConfiguracion {
 
         try {
             File file = getJsonFile();
-            Path parent = file.toPath().getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
-            MAPPER.writerWithDefaultPrettyPrinter().writeValue(file, config);
+            Utilidades.escribirArchivoAtomico(
+                    file.toPath(),
+                    MAPPER.writerWithDefaultPrettyPrinter().writeValueAsBytes(config)
+            );
         } catch (Exception e) {
             System.err.println("Error al guardar " + JSON_FILE + ": " + e.getMessage());
         }

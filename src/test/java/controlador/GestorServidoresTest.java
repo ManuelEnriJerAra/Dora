@@ -674,6 +674,39 @@ class GestorServidoresTest {
     }
 
     @Test
+    void importarModpackModrinthReemplazandoMods_debeRestaurarModsSiFallaLaDescarga() throws Exception {
+        FakeModrinthModpackService modpackService = new FakeModrinthModpackService("new.jar");
+        modpackService.failDownloads = true;
+        GestorServidores gestor = new GestorServidores(tempDir.resolve("ServerList.json").toFile(), modpackService);
+        Server server = modpackServer("modpack-replace-download-failure");
+        Path serverDir = Path.of(server.getServerDir());
+        Path oldJar = serverDir.resolve("mods").resolve("old.jar");
+        Path otherJar = serverDir.resolve("mods").resolve("other.jar");
+        writeFabricModJar(oldJar, "old");
+        writeFabricModJar(otherJar, "other");
+        byte[] oldBytes = Files.readAllBytes(oldJar);
+
+        assertThatThrownBy(() -> gestor.importarModpackModrinth(
+                server,
+                tempDir.resolve("pack.mrpack"),
+                ModrinthModpackService.ImportOptions.server(),
+                GestorServidores.ModpackImportConflictPolicy.REPLACE_EXISTING,
+                new ArrayList<>()
+        ))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Fallo de red simulado")
+                .hasMessageContaining("se han restaurado los mods");
+
+        assertThat(oldJar).isRegularFile();
+        assertThat(Files.readAllBytes(oldJar)).isEqualTo(oldBytes);
+        assertThat(otherJar).isRegularFile();
+        assertThat(serverDir.resolve("mods").resolve("new.jar")).doesNotExist();
+        assertThat(serverDir.resolve(".dora-backup")).doesNotExist();
+        assertThat(server.getExtensions()).extracting(extension -> extension.getFileName())
+                .containsExactlyInAnyOrder("old.jar", "other.jar");
+    }
+
+    @Test
     void importarModpackModrinthReemplazandoMods_noDebeEliminarSiServidorEstaEncendido() throws Exception {
         FakeModrinthModpackService modpackService = new FakeModrinthModpackService("new.jar");
         GestorServidores gestor = new GestorServidores(tempDir.resolve("ServerList.json").toFile(), modpackService);
@@ -1617,7 +1650,7 @@ class GestorServidoresTest {
     }
 
     @Test
-    void refrescarServidoresGuardados_debeEliminarCarpetasBorradasYLimpiarSeleccion() throws Exception {
+    void refrescarServidoresGuardados_debeOcultarCarpetasBorradasSinPerderlasYLimpiarSeleccion() throws Exception {
         Path jsonPath = tempDir.resolve("dora-server-list.json");
         GestorServidores gestor = new GestorServidores(jsonPath.toFile());
         Path staleDir = tempDir.resolve("stale");
@@ -1631,15 +1664,64 @@ class GestorServidoresTest {
         gestor.refrescarServidoresGuardados();
 
         assertThat(gestor.getListaServidores()).extracting(Server::getId).containsExactly(valid.getId());
+        assertThat(gestor.getServidoresNoDisponibles()).extracting(Server::getId).containsExactly(stale.getId());
         assertThat(gestor.getServidorSeleccionado()).isNull();
-        assertThat(gestor.getAvisoServidoresNoCargados()).contains("No se han podido cargar 1 servidores");
+        assertThat(gestor.getAvisoServidoresNoCargados())
+                .contains("No se han podido cargar 1 servidores")
+                .contains("se conservan");
 
+        // Sigue oculto al recargar, pero no se ha borrado del JSON.
         GestorServidores recargado = new GestorServidores(jsonPath.toFile());
         assertThat(recargado.getListaServidores()).extracting(Server::getId).containsExactly(valid.getId());
+        assertThat(recargado.getServidoresNoDisponibles()).extracting(Server::getId).containsExactly(stale.getId());
+        assertThat(Files.readString(jsonPath)).contains(stale.getId());
     }
 
     @Test
-    void constructor_debeEliminarServidoresPersistidosNoCargables() throws Exception {
+    void servidorNoDisponible_debeVolverConSuConfiguracionCuandoLaCarpetaReaparece() throws Exception {
+        Path jsonPath = tempDir.resolve("dora-server-list.json");
+        GestorServidores gestor = new GestorServidores(jsonPath.toFile());
+        Path externalDir = tempDir.resolve("external-drive").resolve("server");
+        Path parkedDir = tempDir.resolve("unplugged");
+        Server external = crearServidorPersistible("External", externalDir);
+        external.getServerConfig().setRamMax(6144);
+        external.setFavorito(true);
+        gestor.guardarServidor(external);
+
+        // Simulamos un disco externo desconectado y un guardado posterior de otro servidor.
+        Files.move(externalDir, parkedDir);
+        GestorServidores sinDisco = new GestorServidores(jsonPath.toFile());
+        assertThat(sinDisco.getListaServidores()).isEmpty();
+        sinDisco.guardarServidor(crearServidorPersistible("Other", tempDir.resolve("other")));
+
+        Files.move(parkedDir, externalDir);
+        GestorServidores conDisco = new GestorServidores(jsonPath.toFile());
+
+        assertThat(conDisco.getServidoresNoDisponibles()).isEmpty();
+        Server recuperado = conDisco.getServerById(external.getId());
+        assertThat(recuperado).isNotNull();
+        assertThat(recuperado.getServerConfig().getRamMax()).isEqualTo(6144);
+        assertThat(recuperado.getFavorito()).isTrue();
+    }
+
+    @Test
+    void olvidarServidorNoDisponible_debeQuitarloDelJson() throws Exception {
+        Path jsonPath = tempDir.resolve("dora-server-list.json");
+        GestorServidores gestor = new GestorServidores(jsonPath.toFile());
+        Path staleDir = tempDir.resolve("stale");
+        Server stale = crearServidorPersistible("Stale", staleDir);
+        gestor.guardarServidor(stale);
+        deleteDirectoryIfExists(staleDir);
+        gestor.refrescarServidoresGuardados();
+
+        assertThat(gestor.olvidarServidorNoDisponible(stale.getId())).isTrue();
+
+        assertThat(gestor.getServidoresNoDisponibles()).isEmpty();
+        assertThat(Files.readString(jsonPath)).doesNotContain(stale.getId());
+    }
+
+    @Test
+    void constructor_debeOcultarServidoresPersistidosNoCargablesSinBorrarlos() throws Exception {
         Path jsonPath = tempDir.resolve("dora-server-list.json");
         Path validDir = tempDir.resolve("valid-server");
         Path invalidDir = tempDir.resolve("invalid-server");
@@ -1659,7 +1741,42 @@ class GestorServidoresTest {
         GestorServidores gestor = new GestorServidores(jsonPath.toFile());
 
         assertThat(gestor.getListaServidores()).extracting(Server::getDisplayName).containsExactly("Valid");
+        assertThat(gestor.getServidoresNoDisponibles()).extracting(Server::getDisplayName).containsExactly("Invalid");
         assertThat(gestor.getAvisoServidoresNoCargados()).contains("No se han podido cargar 1 servidores");
+        assertThat(Files.readString(jsonPath)).contains(invalid.getId());
+    }
+
+    @Test
+    void constructor_debeRespaldarListaIlegibleAntesDeSobrescribirla() throws Exception {
+        Path jsonPath = tempDir.resolve("dora-server-list.json");
+        String contenidoRoto = "[{\"id\":\"abc\",\"displayName\":\"Mi servidor\"";
+        Files.writeString(jsonPath, contenidoRoto, StandardCharsets.UTF_8);
+
+        GestorServidores gestor = new GestorServidores(jsonPath.toFile());
+        gestor.guardarServidor(crearServidorPersistible("Nuevo", tempDir.resolve("nuevo")));
+
+        assertThat(gestor.getAvisoListaServidoresIlegible()).contains("copia");
+        List<Path> copias;
+        try (var files = Files.list(tempDir)) {
+            copias = files.filter(path -> path.getFileName().toString().startsWith("dora-server-list.json.corrupt-")).toList();
+        }
+        assertThat(copias).hasSize(1);
+        assertThat(Files.readString(copias.getFirst(), StandardCharsets.UTF_8)).isEqualTo(contenidoRoto);
+    }
+
+    @Test
+    void guardarServidores_noDebeDejarArchivosTemporales() throws Exception {
+        Path configDir = tempDir.resolve("config");
+        Path jsonPath = configDir.resolve("dora-server-list.json");
+        GestorServidores gestor = new GestorServidores(jsonPath.toFile());
+        gestor.guardarServidor(crearServidorPersistible("Uno", tempDir.resolve("uno")));
+        gestor.guardarServidor(crearServidorPersistible("Dos", tempDir.resolve("dos")));
+
+        try (var files = Files.list(configDir)) {
+            assertThat(files.map(path -> path.getFileName().toString()).toList())
+                    .containsExactly("dora-server-list.json");
+        }
+        assertThat(new GestorServidores(jsonPath.toFile()).getListaServidores()).hasSize(2);
     }
 
     @Test
@@ -1913,6 +2030,7 @@ class GestorServidoresTest {
         private final String fileName;
         private int reads;
         private int downloads;
+        private boolean failDownloads;
 
         private FakeModrinthModpackService(String fileName) {
             this.fileName = fileName;
@@ -1961,6 +2079,9 @@ class GestorServidoresTest {
                                       File destination,
                                       controlador.platform.FileDownloader downloader) throws java.io.IOException {
             downloads++;
+            if (failDownloads) {
+                throw new java.io.IOException("Fallo de red simulado");
+            }
             try {
                 writeFabricModJar(destination.toPath(), fileName.replace(".jar", ""));
             } catch (Exception ex) {
