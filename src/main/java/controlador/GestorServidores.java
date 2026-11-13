@@ -1238,9 +1238,21 @@ public class GestorServidores {
             if(mostrarEnConsola){
                 server.appendConsoleLinea("[INFO] Enviado comando: '"+comando+"'.");
             }
+            if(esComandoParada(comando) && !Boolean.TRUE.equals(server.getDeteniendo())){
+                server.setDeteniendo(true);
+                server.setParadaSolicitadaMillis(System.currentTimeMillis());
+                notificarEstadoServidor(server);
+            }
         } catch (Exception e) {
             server.appendConsoleLinea("[ERROR] Error mandando '"+comando+"' "+e.getMessage());
         }
+    }
+
+    static boolean esComandoParada(String comando){
+        if(comando == null) return false;
+        String limpio = comando.strip();
+        if(limpio.startsWith("/")) limpio = limpio.substring(1);
+        return limpio.equalsIgnoreCase("stop") || limpio.equalsIgnoreCase("end");
     }
 
     private String construirNombreServidorImportado(String version, String serverDir, boolean forzarSufijoCopia) {

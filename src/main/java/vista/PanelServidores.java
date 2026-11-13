@@ -1080,9 +1080,10 @@ public class PanelServidores extends FlatScrollPane {
 
     private void actualizarEstadoLabel(JLabel estado, Server server){
         boolean vivo = server != null && server.getServerProcess() != null && server.getServerProcess().isAlive();
-        boolean iniciando = vivo && Boolean.TRUE.equals(server.getIniciando());
-        String dotColor = iniciando ? "#FF9800" : (vivo ? "#00C853" : "#D50000");
-        String texto = iniciando ? "Iniciando" : (vivo ? "Activo" : "Inactivo");
+        boolean deteniendo = vivo && Boolean.TRUE.equals(server.getDeteniendo());
+        boolean iniciando = vivo && !deteniendo && Boolean.TRUE.equals(server.getIniciando());
+        String dotColor = (iniciando || deteniendo) ? "#FF9800" : (vivo ? "#00C853" : "#D50000");
+        String texto = deteniendo ? "Deteniendo" : (iniciando ? "Iniciando" : (vivo ? "Activo" : "Inactivo"));
         estado.setText("<html><span style='color:" + dotColor + ";'>●</span> " + texto + "</html>");
     }
 

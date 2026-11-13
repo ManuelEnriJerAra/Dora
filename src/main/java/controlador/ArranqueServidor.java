@@ -193,6 +193,7 @@ final class ArranqueServidor {
             Process proceso = pb.start();
             server.setServerProcess(proceso);
             server.setIniciando(true);
+            server.setDeteniendo(false);
             gestor.notificarEstadoServidor(server);
 
             // comienzo a leer la consola
@@ -206,6 +207,7 @@ final class ArranqueServidor {
                        server.setServerProcess(null);
                    }
                    server.setIniciando(false);
+                   server.setDeteniendo(false);
                    server.setLogReaderIniciado(false);
                    server.appendConsoleLinea("[INFO] El servidor se ha detenido.");
                    gestor.notificarEstadoServidor(server);
