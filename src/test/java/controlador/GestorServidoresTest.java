@@ -52,32 +52,24 @@ class GestorServidoresTest {
 
     @Test
     void validarNombreCarpetaServidor_debeAceptarSoloNombresPortables() {
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server-1.20.1")).isNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("Forge_Server")).isNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server-1.20.1")).isNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("Forge_Server")).isNull();
 
-        assertThat(GestorServidores.validarNombreCarpetaServidor("")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor(" server")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server ")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor(".")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("..")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server.")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server/name")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server\\name")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server:name")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("CON")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("com1.txt")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor(" server")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server ")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor(".")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("..")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server.")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server/name")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server\\name")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server:name")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("CON")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("com1.txt")).isNotNull();
     }
 
     @Test
     void filtrosCreacionVersiones_debenMostrarReleasesYSnapshotsCuandoAmbosEstanActivos() throws Exception {
-        GestorServidores gestor = new GestorServidores(tempDir.resolve("dora-server-list.json").toFile());
-        Method debeMostrar = GestorServidores.class.getDeclaredMethod(
-                "debeMostrarOpcionCreacion",
-                ServerCreationOption.class,
-                boolean.class,
-                boolean.class
-        );
-        debeMostrar.setAccessible(true);
         ServerCreationOption release = new ServerCreationOption(
                 ServerPlatform.FABRIC,
                 "1.21.2",
@@ -95,10 +87,10 @@ class GestorServidoresTest {
                 ServerCreationOption.VERSION_TYPE_SNAPSHOT
         );
 
-        assertThat((Boolean) debeMostrar.invoke(gestor, release, true, true)).isTrue();
-        assertThat((Boolean) debeMostrar.invoke(gestor, snapshot, true, true)).isTrue();
-        assertThat((Boolean) debeMostrar.invoke(gestor, release, true, false)).isFalse();
-        assertThat((Boolean) debeMostrar.invoke(gestor, snapshot, false, true)).isFalse();
+        assertThat(AsistenteCreacionServidor.debeMostrarOpcionCreacion(release, true, true)).isTrue();
+        assertThat(AsistenteCreacionServidor.debeMostrarOpcionCreacion(snapshot, true, true)).isTrue();
+        assertThat(AsistenteCreacionServidor.debeMostrarOpcionCreacion(release, true, false)).isFalse();
+        assertThat(AsistenteCreacionServidor.debeMostrarOpcionCreacion(snapshot, false, true)).isFalse();
     }
 
     @Test
