@@ -58,7 +58,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.time.Duration;
-import java.util.concurrent.TimeUnit;
 
 
 @Getter
@@ -87,6 +86,8 @@ public class GestorServidores {
     private final ConversorPlataformaServidor conversor = new ConversorPlataformaServidor(this);
     @Getter(AccessLevel.NONE)
     private final ArranqueServidor arranque = new ArranqueServidor(this);
+    @Getter(AccessLevel.NONE)
+    private final ParadaServidor parada = new ParadaServidor(this);
     private ServerAutomationService automationService;
 
     private String avisoServidoresNoCargados;
@@ -1179,41 +1180,18 @@ public class GestorServidores {
     // Pedir una parada segura ("stop") a todos los servidores activos para salir del programa.
     // Devuelve los servidores a los que se ha pedido la parada.
     public List<Server> pedirParadaServidoresActivosParaSalir() {
-        List<Server> activos = getServidoresActivos();
-        for (Server server : activos) {
-            try {
-                safePararServidor(server);
-            } catch (RuntimeException ignored) {
-            }
-        }
-        return activos;
+        return parada.pedirParadaServidoresActivosParaSalir();
     }
 
     // Esperar hasta "espera" a que los servidores indicados terminen (incluidos procesos hijos).
     // Devuelve los que siguen vivos. No fuerza ningún cierre: guardar el mundo puede tardar.
     public List<Server> esperarParadaServidores(List<Server> servidores, Duration espera) throws InterruptedException {
-        long limite = System.nanoTime() + Math.max(0L, espera.toNanos());
-        for (Server server : servidores) {
-            Process proceso = server == null ? null : server.getServerProcess();
-            if (proceso == null) continue;
-            long restante = limite - System.nanoTime();
-            if (restante <= 0) break;
-            proceso.waitFor(restante, TimeUnit.NANOSECONDS);
-        }
-        return servidores.stream()
-                .filter(s -> s != null && ProcessTreeTerminator.isTreeAlive(s.getServerProcess()))
-                .toList();
+        return parada.esperarParadaServidores(servidores, espera);
     }
 
     // Forzar el cierre de los servidores indicados que sigan vivos.
     public void forzarPararServidores(List<Server> servidores) {
-        for (Server server : servidores) {
-            if (server == null || !ProcessTreeTerminator.isTreeAlive(server.getServerProcess())) continue;
-            try {
-                forzarPararServidor(server);
-            } catch (RuntimeException ignored) {
-            }
-        }
+        parada.forzarPararServidores(servidores);
     }
 
     // ===== MÉTODOS DE CONTROL DEL SERVIDOR =====
@@ -1224,54 +1202,15 @@ public class GestorServidores {
 
     // Eliminar el proceso de servidor, a evitar, puede provocar corrupción de mundos
     public void forzarPararServidor(Server server){
-        Process proceso = server.getServerProcess();
-
-        if(!ProcessTreeTerminator.isTreeAlive(proceso)) {
-            server.appendConsoleLinea("[INFO] El servidor no está en ejecución");
-            server.setServerProcess(null);
-            server.setIniciando(false);
-            notificarEstadoServidor(server);
-            return;
-        }
-        server.appendConsoleLinea("[INFO] Forzando cierre del servidor...");
-
-        // Cerramos el árbol completo: en Forge/NeoForge el proceso guardado es run.bat/run.sh y el
-        // servidor Java real es un proceso hijo que, si no, quedaría vivo y huérfano.
-        boolean destruido = false;
-        try{
-            destruido = ProcessTreeTerminator.terminate(proceso, Duration.ofSeconds(3), Duration.ofSeconds(3));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } finally{
-            if(destruido){
-                server.appendConsoleLinea("[INFO] Se ha cerrado el servidor de forma forzada, no se han guardado los cambios.");
-            }
-            else{
-                server.appendConsoleLinea("[ERROR] No se ha podido cerrar el servidor.");
-            }
-            // Si no está vivo limpiamos referencia
-            if(!proceso.isAlive()) server.setServerProcess(null);
-            if(!proceso.isAlive()) server.setIniciando(false);
-            notificarEstadoServidor(server);
-        }
+        parada.forzarPararServidor(server);
     }
 
     public void safePararServidor(Server server){
-        mandarComando(server, "stop");
+        parada.safePararServidor(server);
     }
 
     public void reiniciarServidor(Server server) throws IOException {
-        if (server == null) {
-            return;
-        }
-        Process proceso = server.getServerProcess();
-        if (proceso != null && proceso.isAlive()) {
-            server.setRestartPending(true);
-            safePararServidor(server);
-            notificarEstadoServidor(server);
-            return;
-        }
-        iniciarServidor(server);
+        parada.reiniciarServidor(server);
     }
 
     public Server getServerById(String id){
