@@ -102,8 +102,6 @@ public class GestorServidores {
     // ===== ATRIBUTOS =====
     private static final MojangAPI MOJANG_API = new MojangAPI();
 
-    // AtomicInteger nos elimina el riesgo de condición de carrera si varios servidores intentan acceder a la vez
-    private static final AtomicInteger NEXT_PORT_SESION = new AtomicInteger(25565);
     private static final int PUERTO_MINECRAFT_DEFECTO = 25565;
     private static final int PUERTO_MAXIMO = 65535;
 
@@ -170,22 +168,6 @@ public class GestorServidores {
                     cambios = true;
                 }
             } catch (RuntimeException ignored) {
-            }
-        }
-        return cambios;
-    }
-
-    private boolean sincronizarExtensionesServidoresCargados() {
-        if (listaServidores == null || listaServidores.isEmpty()) return false;
-
-        boolean cambios = false;
-        for (Server server : listaServidores) {
-            if (server == null) continue;
-            try {
-                if (sincronizarExtensionesServidor(server)) {
-                    cambios = true;
-                }
-            } catch (IOException | RuntimeException ignored) {
             }
         }
         return cambios;
@@ -1556,65 +1538,6 @@ public class GestorServidores {
         );
     }
 
-    /*
-    private Server crearServidorLegacyDialogos(){
-        ServerPlatformAdapter adapter = seleccionarAdaptadorCreacion();
-        if (adapter == null) return null;
-
-        List<ServerCreationOption> options = cargarOpcionesCreacion(adapter);
-        if (options == null || options.isEmpty()) {
-            JOptionPane.showMessageDialog(
-                    null,
-                    "No hay versiones disponibles para " + adapter.getCreationDisplayName() + ".",
-                    "Crear servidor",
-                    JOptionPane.WARNING_MESSAGE
-            );
-            return null;
-        }
-
-        ServerCreationOption selectedOption = seleccionarOpcionCreacion(adapter, options);
-        if (selectedOption == null) return null;
-
-        JFileChooser chooser = new JFileChooser();
-        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        chooser.setAcceptAllFileFilterUsed(false);
-        chooser.setDialogTitle("Selecciona donde se creará la carpeta del servidor");
-        if(chooser.showDialog(chooser,"Seleccionar") != JFileChooser.APPROVE_OPTION){
-            return null;
-        }
-
-        File carpetaSeleccionada = chooser.getSelectedFile();
-        if(!carpetaSeleccionada.isDirectory()){
-            carpetaSeleccionada = carpetaSeleccionada.getParentFile();
-        }
-
-        File carpetaPadre = carpetaSeleccionada.getAbsoluteFile();
-        File targetFolderSugerido = resolverDirectorioServidorDisponible(
-                carpetaPadre,
-                selectedOption.directoryName()
-        );
-        String nombreCarpeta = solicitarNombreCarpetaServidor(
-                carpetaPadre,
-                targetFolderSugerido.getName()
-        );
-        if (nombreCarpeta == null) {
-            return null;
-        }
-
-        File targetFolder = new File(
-                carpetaPadre,
-                nombreCarpeta
-        );
-
-        int eula = JOptionPane.showConfirmDialog(null, "¿Aceptas el EULA de Mojang (https://aka.ms/MinecraftEULA)?", "EULA",  JOptionPane.YES_NO_OPTION);
-        if(eula != JOptionPane.YES_OPTION){
-            return null;
-        }
-
-        return crearServidorAutomatizado(adapter, selectedOption, targetFolder.toPath());
-    }
-    */
-
     public Server convertirServidorAPlataformaCompatible(Server server) {
         if (server == null) return null;
         if (server.getServerProcess() != null && server.getServerProcess().isAlive()) {
@@ -1936,100 +1859,6 @@ public class GestorServidores {
         return value == null || value.isBlank() ? "desconocida" : value;
     }
 
-    // esta función descarga de una url a un destino dándole un nombre y mostrando un diálogo modal
-    private boolean descargarConDialogo(String url, File destino, String titulo){
-        final JDialog dialog = new JDialog((Frame) null, titulo, true);
-        dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-
-        JPanel contenido = new JPanel(new BorderLayout(10, 10));
-        contenido.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-
-        JLabel label = new JLabel("Descargando...");
-        JLabel detalle = new JLabel("Por favor espera. La ventana se cerrará al terminar.");
-        detalle.setForeground(AppTheme.getMutedForeground());
-        JProgressBar progreso = AppTheme.createLoadingProgressBar(true);
-
-        contenido.add(label, BorderLayout.NORTH);
-        contenido.add(detalle, BorderLayout.CENTER);
-        contenido.add(progreso, BorderLayout.SOUTH);
-        dialog.setContentPane(contenido);
-        dialog.setSize(420, 120);
-        dialog.setLocationRelativeTo(null);
-
-        // SwingWorker permite hacer un trabajo pesado y actualizar la interfaz de forma segura
-        SwingWorker<Void, Void> worker = new SwingWorker<>() {
-            @Override
-            protected Void doInBackground() {
-                final long[] ultimoPorcentaje = { -1 };
-                MOJANG_API.descargar(url, destino, (leidos, total) -> {
-                    if (isCancelled()) return;
-                    if (total <= 0) return;
-                    long porcentaje = (leidos * 100L) / total;
-                    if (porcentaje == ultimoPorcentaje[0]) return;
-                    ultimoPorcentaje[0] = porcentaje;
-                    setProgress((int) Math.max(0, Math.min(100, porcentaje)));
-                });
-                return null;
-            }
-
-            @Override
-            protected void done() {
-                dialog.dispose();
-            }
-        };
-
-        worker.addPropertyChangeListener(evt -> {
-            if (!"progress".equals(evt.getPropertyName())) return;
-            Object valorPropiedad = evt.getNewValue();
-            if (!(valorPropiedad instanceof Integer p)) return;
-            if (progreso.isIndeterminate()) progreso.setIndeterminate(false);
-            progreso.setValue(p);
-        });
-
-        worker.execute();
-        dialog.setVisible(true);
-
-        try{
-            worker.get(); // bloquea el programa hasta que worker termina
-            return true;
-        } catch (Exception e){
-            try{
-                if(destino.exists()) destino.delete();
-            } catch (RuntimeException ignored){}
-            JOptionPane.showMessageDialog(
-                    null,
-                    "No se ha podido descargar el servidor: " + mensajeErrorDescarga(e),
-                    "Descarga",
-                    JOptionPane.ERROR_MESSAGE
-            );
-            return false;
-        }
-    }
-
-    private ServerPlatformAdapter seleccionarAdaptadorCreacion() {
-        List<ServerPlatformAdapter> creatableAdapters = ServerPlatformAdapters.creatable();
-        if (creatableAdapters.isEmpty()) {
-            return null;
-        }
-        PlatformSelectorPanel platformSelector = new PlatformSelectorPanel(
-                creatableAdapters,
-                null,
-                null
-        );
-
-        int option = JOptionPane.showConfirmDialog(
-                null,
-                platformSelector,
-                "Selecciona una plataforma",
-                JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE
-        );
-        if (option != JOptionPane.OK_OPTION) {
-            return null;
-        }
-        return platformSelector.getSelectedAdapter();
-    }
-
     private List<ServerCreationOption> cargarOpcionesCreacion(ServerPlatformAdapter adapter) {
         try {
             return ejecutarTareaConDialogo(
@@ -2048,11 +1877,6 @@ public class GestorServidores {
         }
     }
 
-    private List<ServerCreationOption> cargarOpcionesConversion(Server server, ServerPlatformAdapter adapter) {
-        List<ServerCreationOption> options = cargarOpcionesCreacion(adapter);
-        return filtrarOpcionesConversion(server, options);
-    }
-
     private List<ServerCreationOption> filtrarOpcionesConversion(Server server, List<ServerCreationOption> options) {
         if (options == null || options.isEmpty()) {
             return List.of();
@@ -2063,54 +1887,6 @@ public class GestorServidores {
         return options.stream()
                 .filter(option -> ServerCreationOption.isCompatibleMinecraftVersion(option.minecraftVersion(), server.getVersion()))
                 .toList();
-    }
-
-    private ServerPlatformAdapter seleccionarAdaptadorConversion(ServerPlatform sourcePlatform) {
-        return seleccionarAdaptadorConversion(sourcePlatform, null);
-    }
-
-    private ServerPlatformAdapter seleccionarAdaptadorConversion(ServerPlatform sourcePlatform,
-                                                                List<ConversionTargetAvailability> targetAvailability) {
-        List<ServerPlatformAdapter> targetAdapters = plataformasObjetivoConversion(sourcePlatform);
-        if (targetAdapters.isEmpty()) {
-            return null;
-        }
-        Map<ServerPlatform, String> disabledTooltips = new java.util.LinkedHashMap<>();
-        if (targetAvailability != null) {
-            targetAdapters = targetAvailability.stream()
-                    .map(ConversionTargetAvailability::adapter)
-                    .toList();
-            for (ConversionTargetAvailability availability : targetAvailability) {
-                if (!availability.available()) {
-                    disabledTooltips.put(availability.adapter().getPlatform(), availability.unavailableReason());
-                }
-            }
-        }
-        ServerPlatformAdapter initialSelection = targetAvailability == null
-                ? null
-                : targetAvailability.stream()
-                .filter(ConversionTargetAvailability::available)
-                .map(ConversionTargetAvailability::adapter)
-                .findFirst()
-                .orElse(null);
-        PlatformSelectorPanel platformSelector = new PlatformSelectorPanel(
-                targetAdapters,
-                initialSelection,
-                null,
-                disabledTooltips
-        );
-
-        int option = JOptionPane.showConfirmDialog(
-                null,
-                platformSelector,
-                "Selecciona una plataforma destino",
-                JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE
-        );
-        if (option != JOptionPane.OK_OPTION) {
-            return null;
-        }
-        return platformSelector.getSelectedAdapter();
     }
 
     private List<ConversionTargetAvailability> cargarDisponibilidadConversion(Server server, ServerPlatform sourcePlatform) {
@@ -2178,187 +1954,6 @@ public class GestorServidores {
                 .filter(adapter -> adapter.getPlatform() != resolvedSource)
                 .filter(adapter -> adapter.getPlatform().isModPlatform() || adapter.getPlatform().isPluginPlatform())
                 .toList();
-    }
-
-    private ServerCreationOption seleccionarOpcionCreacion(ServerPlatformAdapter adapter, List<ServerCreationOption> options) {
-        return seleccionarOpcionConversion(
-                "Selecciona una versión de " + adapter.getCreationDisplayName(),
-                options,
-                null,
-                null
-        );
-    }
-
-    private ServerCreationOption seleccionarOpcionConversion(String title, List<ServerCreationOption> options) {
-        return seleccionarOpcionConversion(title, options, null, null);
-    }
-
-    private ServerCreationOption seleccionarOpcionConversion(String title,
-                                                             List<ServerCreationOption> options,
-                                                             ConversionSource source,
-                                                             String sourceMinecraftVersion) {
-        JComboBox<ServerCreationOption> versionBox = new JComboBox<>(options.toArray(ServerCreationOption[]::new));
-        versionBox.setRenderer((list, value, index, isSelected, cellHasFocus) -> {
-            JLabel label = new JLabel(value == null ? "" : value.displayName());
-            label.setOpaque(true);
-            if (isSelected) {
-                label.setBackground(list.getSelectionBackground());
-                label.setForeground(list.getSelectionForeground());
-            } else {
-                label.setBackground(list.getBackground());
-                label.setForeground(list.getForeground());
-            }
-            return label;
-        });
-        JComponent content = versionBox;
-        if ((source != null && source.platform() != null)
-                || (sourceMinecraftVersion != null && !sourceMinecraftVersion.isBlank())) {
-            JPanel panel = new JPanel(new BorderLayout(0, 8));
-            String platformName = source == null || source.platform() == null
-                    ? "desconocida"
-                    : source.platform().getLegacyTypeName();
-            JLabel contextLabel = new JLabel(
-                    "Servidor actual: " + platformName
-                            + " | Minecraft " + textoODesconocido(sourceMinecraftVersion)
-            );
-            contextLabel.setForeground(AppTheme.getMutedForeground());
-            panel.add(contextLabel, BorderLayout.NORTH);
-            panel.add(versionBox, BorderLayout.CENTER);
-            content = panel;
-        }
-
-        int option = JOptionPane.showConfirmDialog(
-                null,
-                content,
-                title,
-                JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE
-        );
-        if (option != JOptionPane.OK_OPTION) {
-            return null;
-        }
-        return (ServerCreationOption) versionBox.getSelectedItem();
-    }
-
-    private String solicitarNombreCarpetaServidor(File carpetaPadre, String nombreSugerido) {
-        if (GraphicsEnvironment.isHeadless()) {
-            String nombre = normalizarNombreCarpeta(nombreSugerido);
-            return validarNombreCarpetaServidor(nombre) == null ? nombre : null;
-        }
-
-        Window owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
-        JDialog dialog = new JDialog(owner, "Nombre de la carpeta", Dialog.ModalityType.APPLICATION_MODAL);
-        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-
-        JPanel root = new JPanel(new BorderLayout(0, 10));
-        root.setBorder(BorderFactory.createEmptyBorder(18, 18, 14, 18));
-
-        JTextField nameField = new JTextField(normalizarNombreCarpeta(nombreSugerido), 24);
-        String defaultFolderName = nameField.getText();
-        JLabel parentLabel = new JLabel(formatearPrefijoCarpetaPadre(carpetaPadre));
-        Font pathFont = new Font(Font.MONOSPACED, Font.PLAIN, 16);
-        parentLabel.setFont(pathFont);
-        nameField.setFont(pathFont);
-
-        JButton resetButton = new JButton();
-        AppTheme.applyHeaderIconButtonStyle(resetButton);
-        resetButton.setToolTipText("Restablecer nombre");
-        resetButton.setPreferredSize(new Dimension(40, 40));
-        resetButton.setMinimumSize(new Dimension(40, 40));
-        resetButton.setMaximumSize(new Dimension(40, 40));
-        SvgIconFactory.RotatingIcon resetIcon = SvgIconFactory.createRotating(
-                "doraicons/reset.svg",
-                26,
-                26,
-                AppTheme::getForeground
-        );
-        resetButton.setIcon(resetIcon);
-
-        JPanel pathPanel = new JPanel(new BorderLayout(0, 0));
-        Color folderNameBorderColor = UIManager.getColor("Component.borderColor") == null
-                ? Color.GRAY
-                : UIManager.getColor("Component.borderColor");
-        pathPanel.setBorder(AppTheme.createRoundedBorder(new Insets(6, 8, 6, 6), folderNameBorderColor, 1f));
-        pathPanel.setBackground(UIManager.getColor("TextField.background"));
-        pathPanel.setOpaque(true);
-        parentLabel.setOpaque(false);
-        nameField.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        nameField.setOpaque(false);
-        pathPanel.add(parentLabel, BorderLayout.WEST);
-        pathPanel.add(nameField, BorderLayout.CENTER);
-        pathPanel.add(resetButton, BorderLayout.EAST);
-
-        JLabel statusLabel = new JLabel(" ");
-        JPanel form = new JPanel(new BorderLayout(0, 6));
-        form.add(pathPanel, BorderLayout.CENTER);
-        form.add(statusLabel, BorderLayout.SOUTH);
-        root.add(form, BorderLayout.CENTER);
-
-        JButton cancelButton = new JButton("Cancelar");
-        JButton continueButton = new JButton("Continuar");
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        buttons.add(cancelButton);
-        buttons.add(continueButton);
-        root.add(buttons, BorderLayout.SOUTH);
-
-        AtomicReference<String> resultado = new AtomicReference<>();
-        Runnable validar = () -> {
-            String nombre = nameField.getText();
-            String error = validarNombreCarpetaServidor(nombre);
-            if (error == null && existeCarpetaConNombreNoPortable(carpetaPadre, nombre)) {
-                error = "Ya existe una carpeta con ese nombre.";
-            }
-            statusLabel.setText(error == null ? " " : error);
-            statusLabel.setForeground(error == null ? UIManager.getColor("Label.foreground") : Color.RED);
-            continueButton.setEnabled(error == null);
-        };
-        nameField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            @Override
-            public void insertUpdate(javax.swing.event.DocumentEvent e) {
-                validar.run();
-            }
-
-            @Override
-            public void removeUpdate(javax.swing.event.DocumentEvent e) {
-                validar.run();
-            }
-
-            @Override
-            public void changedUpdate(javax.swing.event.DocumentEvent e) {
-                validar.run();
-            }
-        });
-        resetButton.addActionListener(e -> {
-            nameField.setText(defaultFolderName);
-            nameField.requestFocusInWindow();
-            nameField.selectAll();
-            animarIconoReset(resetIcon, resetButton);
-        });
-        cancelButton.addActionListener(e -> {
-            resultado.set(null);
-            dialog.dispose();
-        });
-        continueButton.addActionListener(e -> {
-            String nombre = nameField.getText();
-            if (validarNombreCarpetaServidor(nombre) != null || existeCarpetaConNombreNoPortable(carpetaPadre, nombre)) {
-                validar.run();
-                return;
-            }
-            resultado.set(normalizarNombreCarpeta(nombre));
-            dialog.dispose();
-        });
-
-        dialog.setContentPane(root);
-        dialog.pack();
-        dialog.setMinimumSize(new Dimension(640, dialog.getHeight()));
-        dialog.setLocationRelativeTo(null);
-        SwingUtilities.invokeLater(() -> {
-            nameField.requestFocusInWindow();
-            nameField.selectAll();
-        });
-        validar.run();
-        dialog.setVisible(true);
-        return resultado.get();
     }
 
     private static String formatearPrefijoCarpetaPadre(File carpetaPadre) {
@@ -2622,17 +2217,6 @@ public class GestorServidores {
         }
         sincronizarExtensionesServidor(server);
         serverExtensionsService.persistInstalledExtensionCache(server);
-    }
-
-    private boolean cambiaEcosistemaExtensiones(ServerEcosystemType sourceEcosystem, ServerEcosystemType targetEcosystem) {
-        if (sourceEcosystem == null || targetEcosystem == null) {
-            return false;
-        }
-        return sourceEcosystem != targetEcosystem
-                && sourceEcosystem != ServerEcosystemType.NONE
-                && targetEcosystem != ServerEcosystemType.NONE
-                && sourceEcosystem != ServerEcosystemType.UNKNOWN
-                && targetEcosystem != ServerEcosystemType.UNKNOWN;
     }
 
     private <T> T ejecutarTareaConDialogo(String titulo, String descripcion, Callable<T> task) throws IOException {
@@ -2980,11 +2564,6 @@ public class GestorServidores {
         }
     }
 
-    // Eliminar la carpeta que contiene el servidor, debe comprobar que sea un servidor cargable
-    public int eliminarServidorCompleto(Server server){
-        return 0; // POR IMPLEMENTAR
-    }
-
     // ===== MÉTODOS DE CONTROL DEL SERVIDOR =====
 
     // Cerrojo de arranque: evita dobles arranques y que dos servidores elijan el mismo puerto.
@@ -3302,7 +2881,6 @@ public class GestorServidores {
         int puertoObjetivo = puertoElegido != null ? puertoElegido : puertoConfigurado(serverConfig);
 
         if (isPortAvailableForStart(bindHost, puertoObjetivo, reservados)) {
-            probarSiguientePuerto(puertoObjetivo);
             return puertoObjetivo;
         }
 
@@ -3372,12 +2950,7 @@ public class GestorServidores {
         return null;
     }
 
-        // Política: siempre intentar 25565, luego 25566, 25567...
     // comprobamos si hay libre un puerto
-    private static boolean isPortAvailable(int port){
-        return isPortAvailable(null, port);
-    }
-
     private static boolean isPortAvailable(String bindHost, int port){
         if(port <= 0 || port > PUERTO_MAXIMO) return false;
         try(ServerSocket socket = new ServerSocket()){
@@ -3918,57 +3491,8 @@ public class GestorServidores {
         return state.serverJarUnavailableVersions.contains(option.minecraftVersion());
     }
 
-    private void asegurarAlMenosUnFiltroVersionActivo(JCheckBox snapshotsCheck,
-                                                      JCheckBox releasesCheck,
-                                                      JCheckBox changedCheck) {
-        if (snapshotsCheck == null || releasesCheck == null) {
-            return;
-        }
-        if (snapshotsCheck.isSelected() || releasesCheck.isSelected()) {
-            return;
-        }
-        if (changedCheck != null && changedCheck.isEnabled()) {
-            changedCheck.setSelected(true);
-            return;
-        }
-        releasesCheck.setSelected(true);
-    }
-
     private boolean soportaSnapshotsCreacion(ServerPlatformAdapter adapter) {
         return adapter != null && adapter.supportsUnstableCreationOptions();
-    }
-
-    private String validarOpcionCreacionDescargable(ServerCreationWizardState state,
-                                                    DefaultListModel<ServerCreationOption> versionListModel,
-                                                    JList<ServerCreationOption> versionList) {
-        if (state == null || state.option == null || state.adapter == null) {
-            return "Selecciona una versión.";
-        }
-        if (state.adapter.getPlatform() != modelo.extensions.ServerPlatform.VANILLA) {
-            return null;
-        }
-        String versionId = state.option.minecraftVersion();
-        if (state.serverJarAvailableVersions.contains(versionId)) {
-            return null;
-        }
-        String url;
-        try {
-            url = MOJANG_API.obtenerUrlServerJar(versionId);
-        } catch (RuntimeException e) {
-            url = null;
-        }
-        if (url != null && !url.isBlank()) {
-            state.serverJarAvailableVersions.add(versionId);
-            return null;
-        }
-        if (state.options != null) {
-            state.options = state.options.stream()
-                    .filter(option -> !Objects.equals(option, state.option))
-                    .toList();
-        }
-        state.option = null;
-        actualizarListadoVersiones(state, versionListModel, versionList);
-        return "Esa versión no tiene descarga de servidor disponible. Se ha retirado de la lista.";
     }
 
     private boolean puedeAvanzarPasoCreacionServidor(int stepIndex,
@@ -4319,16 +3843,6 @@ public class GestorServidores {
             ServerCreationOption option,
             File targetDirectory
     ) {
-    }
-
-    // Usar siguiente puerto
-    private static void probarSiguientePuerto(int puertoUsado){
-        int objetivo = puertoUsado + 1;
-        while(true){
-            int actual = NEXT_PORT_SESION.get();
-            if(actual >= objetivo) return;
-            if(NEXT_PORT_SESION.compareAndSet(actual, objetivo)) return;
-        }
     }
 
     private Integer solicitarPuertoAlternativo(Server server,

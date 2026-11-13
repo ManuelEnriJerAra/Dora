@@ -174,15 +174,9 @@ class GestorServidoresTest {
                 return serverDir.resolve("server.jar");
             }
         };
-        Method cargarOpcionesConversion = GestorServidores.class.getDeclaredMethod(
-                "cargarOpcionesConversion",
-                Server.class,
-                ServerPlatformAdapter.class
-        );
-        cargarOpcionesConversion.setAccessible(true);
-
-        @SuppressWarnings("unchecked")
-        List<ServerCreationOption> options = (List<ServerCreationOption>) cargarOpcionesConversion.invoke(gestor, server, adapter);
+        List<ServerCreationOption> options = gestor.evaluarDisponibilidadConversion(server, List.of(adapter))
+                .getFirst()
+                .options();
 
         assertThat(options)
                 .extracting(ServerCreationOption::platformVersion)
@@ -251,15 +245,9 @@ class GestorServidoresTest {
                 return serverDir.resolve("server.jar");
             }
         };
-        Method cargarOpcionesConversion = GestorServidores.class.getDeclaredMethod(
-                "cargarOpcionesConversion",
-                Server.class,
-                ServerPlatformAdapter.class
-        );
-        cargarOpcionesConversion.setAccessible(true);
-
-        @SuppressWarnings("unchecked")
-        List<ServerCreationOption> options = (List<ServerCreationOption>) cargarOpcionesConversion.invoke(gestor, server, adapter);
+        List<ServerCreationOption> options = gestor.evaluarDisponibilidadConversion(server, List.of(adapter))
+                .getFirst()
+                .options();
 
         assertThat(options)
                 .extracting(ServerCreationOption::minecraftVersion)
