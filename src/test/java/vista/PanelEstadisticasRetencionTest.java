@@ -60,7 +60,10 @@ class PanelEstadisticasRetencionTest {
     @Test
     void cargarHistorialAntiguo_agregaLasMuestrasViejasAlHistorico() throws Exception {
         long ahora = System.currentTimeMillis();
-        long haceDosDias = ahora - 48L * 3600 * 1000;
+        // Alineado a la hora para que las dos muestras viejas caigan siempre en el mismo bucket del histórico;
+        // sin esto el test fallaba si el segundo de ejecución cruzaba un borde de bucket.
+        long unaHora = 3600L * 1000;
+        long haceDosDias = ((ahora - 48L * unaHora) / unaHora) * unaHora;
         String muestras = "[{\"value\":10,\"timestampMillis\":" + haceDosDias + ",\"shutdownMarker\":false},"
                 + "{\"value\":20,\"timestampMillis\":" + (haceDosDias + 1000) + ",\"shutdownMarker\":false},"
                 + "{\"value\":30,\"timestampMillis\":" + ahora + ",\"shutdownMarker\":false}]";
