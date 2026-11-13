@@ -4,7 +4,9 @@ Use this guide before editing server import/listing/persistence, start/stop/rest
 
 ## Core Classes
 
-- `controlador.GestorServidores`: central server manager (server list, selection, listeners, import, start/stop).
+- `controlador.GestorServidores`: central server manager (server list, selection, listeners, import). Its start/stop methods are the public entry points and delegate to the two classes below.
+- `controlador.ArranqueServidor`: starting a server (start lock, Java version warning, port choice, process launch, log reader, restart after exit).
+- `controlador.ParadaServidor`: safe stop, restart, process-tree force stop, and the stop/wait/force helpers used when quitting.
 - `controlador.ArchivoListaServidores`: reads and writes `dora-server-list.json`.
 - `controlador.MetadatosServidor`: default values filled into every saved server and the `server.properties` port sync.
 - `controlador.PuertosServidor` and `controlador.DialogoPuertoOcupado`: port checks and the "port busy" dialog used when starting.
@@ -57,7 +59,7 @@ Platform adapters can customize start behavior through:
 
 Forge/NeoForge/Quilt may use generated argument files or special launch paths.
 
-Starting is serialized by `GestorServidores.inicioLock`, not by `synchronized` on the manager. The lock is released while the "port busy" dialog is open: a background thread (automation, restart after exit) that held the lock while waiting on the EDT would freeze the app as soon as the EDT tried to start another server. Ports of other servers Dora is already running count as busy, because a freshly launched server takes a few seconds to bind its port.
+Starting is serialized by `ArranqueServidor.inicioLock`, not by `synchronized` on the manager. The lock is released while the "port busy" dialog is open: a background thread (automation, restart after exit) that held the lock while waiting on the EDT would freeze the app as soon as the EDT tried to start another server. Ports of other servers Dora is already running count as busy, because a freshly launched server takes a few seconds to bind its port.
 
 Before taking the lock, `iniciarServidor` compares the server's Minecraft version with the system `java` (`controlador.platform.JavaRuntimeCompatibility`). A mismatch is logged as `[WARN]`; manual starts also get a dialog once per server per session.
 
@@ -72,6 +74,8 @@ Force stop (`forzarPararServidor`) must close the whole process tree through `co
 Quitting with active servers (`vista.SalidaServidoresActivos`) sends `stop`, then waits in 60-second rounds without killing anything. After each round the user chooses to keep waiting, force close and exit, or cancel the exit. Never add a silent force-kill timeout to the quit path: large or modded worlds can take longer than a minute to save.
 
 `controlador.automation.ServerAutomationService` reuses the same `GestorServidores` lifecycle methods for scheduled starts, stops, restarts, and commands. Keep future automation behavior routed through the manager so manual controls and scheduled actions do not drift.
+
+`ArranqueServidor` and `ParadaServidor` call back through `GestorServidores`' public methods (`iniciarServidor`, `safePararServidor`, `mandarComando`, `notificarEstadoServidor`...) instead of calling each other directly. Keep it that way: the restart-after-exit path and tests that subclass `GestorServidores` rely on those calls going through the manager.
 
 ## Import Pipeline
 
