@@ -73,7 +73,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static controlador.PuertosServidor.PUERTO_MAXIMO;
@@ -93,7 +92,6 @@ public class GestorServidores {
         REPLACE_EXISTING
     }
 
-    private static final Pattern MINECRAFT_VERSION_PATTERN = Pattern.compile("(?i)(?:1\\.(?:0|[1-9][0-9]*)(?:\\.\\d+)?(?:-(?:snapshot|pre|rc)-?\\d+)?|[2-9]\\d*\\.\\d+(?:\\.\\d+)?(?:-(?:snapshot|pre|rc)-?\\d+)?|\\d{2}w\\d{2}[a-z]|[ab]\\d+\\.\\d+(?:\\.\\d+)?)");
 
     // ===== ATRIBUTOS =====
     private static final MojangAPI MOJANG_API = new MojangAPI();
@@ -490,10 +488,6 @@ public class GestorServidores {
         return null;
     }
 
-    private ServerPlatformProfile inspeccionarServidor(Path serverDir) {
-        return ServerPlatformAdapters.detect(serverDir);
-    }
-
     public boolean puedeConvertirseAPlataformaCompatible(Server server) {
         if (server == null || server.getServerDir() == null || server.getServerDir().isBlank()) {
             return false;
@@ -510,9 +504,9 @@ public class GestorServidores {
             return false;
         }
 
-        ServerPlatformProfile profile = inspeccionarServidor(serverDir);
+        ServerPlatformProfile profile = PerfilPlataformaServidor.detectar(serverDir);
         if (profile != null) {
-            aplicarPerfilPlataforma(server, profile);
+            PerfilPlataformaServidor.aplicar(server, profile);
         }
 
         ServerPlatform sourcePlatform = profile == null ? server.getPlatform() : profile.platform();
@@ -1172,28 +1166,15 @@ public class GestorServidores {
         }
     }
 
-    private void aplicarPerfilPlataforma(Server server, ServerPlatformProfile profile) {
-        if (server == null || profile == null) return;
-        server.setPlatform(profile.platform());
-        server.setLoader(profile.loader());
-        server.setLoaderVersion(profile.loaderVersion());
-        server.setEcosystemType(profile.ecosystemType());
-        server.setCapabilities(profile.capabilities());
-        if (profile.minecraftVersion() != null
-                && MINECRAFT_VERSION_PATTERN.matcher(profile.minecraftVersion().trim()).matches()) {
-            server.setVersion(profile.minecraftVersion());
-        }
-    }
-
     private ServerPlatformAdapter resolverAdaptador(Server server) {
         if (server == null || server.getServerDir() == null || server.getServerDir().isBlank()) {
             return ServerPlatformAdapters.forPlatform(null);
         }
 
         Path serverDir = Path.of(server.getServerDir());
-        ServerPlatformProfile profile = inspeccionarServidor(serverDir);
+        ServerPlatformProfile profile = PerfilPlataformaServidor.detectar(serverDir);
         if (profile != null) {
-            aplicarPerfilPlataforma(server, profile);
+            PerfilPlataformaServidor.aplicar(server, profile);
             return ServerPlatformAdapters.forPlatform(profile.platform());
         }
         return ServerPlatformAdapters.forPlatform(server.getPlatform());
@@ -1227,9 +1208,9 @@ public class GestorServidores {
             // si el servidor no es cargable lo apartamos en noCargables, pero NO lo borramos del JSON
             if (esServidorCargable(server)) {
                 try {
-                    ServerPlatformProfile profile = inspeccionarServidor(Path.of(server.getServerDir()));
+                    ServerPlatformProfile profile = PerfilPlataformaServidor.detectar(Path.of(server.getServerDir()));
                     if (profile != null) {
-                        aplicarPerfilPlataforma(server, profile);
+                        PerfilPlataformaServidor.aplicar(server, profile);
                         cambios = true;
                     }
                 } catch (RuntimeException ignored) {
@@ -1352,11 +1333,11 @@ public class GestorServidores {
 
         Path dir = Path.of(server.getServerDir());
         if (!Files.isDirectory(dir)) return false;
-        ServerPlatformProfile profile = inspeccionarServidor(dir);
+        ServerPlatformProfile profile = PerfilPlataformaServidor.detectar(dir);
         ServerPlatformAdapter adapter = ServerPlatformAdapters.forPlatform(profile == null ? server.getPlatform() : profile.platform());
         ServerValidationResult validation = adapter.validate(dir);
         if (validation.valid() && profile != null) {
-            aplicarPerfilPlataforma(server, profile);
+            PerfilPlataformaServidor.aplicar(server, profile);
         }
         return validation.valid();
     }
@@ -1788,9 +1769,9 @@ public class GestorServidores {
         } catch (RuntimeException ex) {
             return null;
         }
-        ServerPlatformProfile sourceProfile = inspeccionarServidor(serverDir);
+        ServerPlatformProfile sourceProfile = PerfilPlataformaServidor.detectar(serverDir);
         if (sourceProfile != null) {
-            aplicarPerfilPlataforma(server, sourceProfile);
+            PerfilPlataformaServidor.aplicar(server, sourceProfile);
             return new ConversionSource(sourceProfile.platform(), sourceProfile.ecosystemType());
         }
         ServerPlatform platform = server.getPlatform() == null ? ServerPlatform.UNKNOWN : server.getPlatform();
@@ -1979,7 +1960,7 @@ public class GestorServidores {
 
         Server server = new Server();
         server.setServerDir(targetDirectory.toAbsolutePath().toString());
-        aplicarPerfilPlataforma(server, inspeccionarServidor(targetDirectory));
+        PerfilPlataformaServidor.aplicar(server, PerfilPlataformaServidor.detectar(targetDirectory));
         if (server.getVersion() == null || server.getVersion().isBlank()) {
             server.setVersion(option.minecraftVersion());
         }
@@ -2051,9 +2032,9 @@ public class GestorServidores {
             }
             GestorMundos.sincronizarMundosServidor(server);
 
-            ServerPlatformProfile targetProfile = inspeccionarServidor(serverDir);
+            ServerPlatformProfile targetProfile = PerfilPlataformaServidor.detectar(serverDir);
             if (targetProfile != null && targetProfile.platform() == option.platform()) {
-                aplicarPerfilPlataforma(server, targetProfile);
+                PerfilPlataformaServidor.aplicar(server, targetProfile);
             } else {
                 aplicarMetadatosPlataformaDestino(server, targetAdapter, option);
             }
@@ -2153,7 +2134,7 @@ public class GestorServidores {
             }
         }
 
-        ServerPlatformProfile profile = inspeccionarServidor(directorioNormalizadoPath);
+        ServerPlatformProfile profile = PerfilPlataformaServidor.detectar(directorioNormalizadoPath);
         if (profile == null) {
             System.out.println("No se ha podido detectar una plataforma válida para el servidor importado.");
             return null;
@@ -2161,7 +2142,7 @@ public class GestorServidores {
 
         Server server = new Server();
         server.setServerDir(directorioNormalizado);
-        aplicarPerfilPlataforma(server, profile);
+        PerfilPlataformaServidor.aplicar(server, profile);
         if (server.getVersion() == null || server.getVersion().isBlank()) {
             server.setVersion(DetectorVersionServidor.detectarVersionVanilla(server));
         }
