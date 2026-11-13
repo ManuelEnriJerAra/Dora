@@ -143,7 +143,7 @@ final class PanelExtensiones extends JPanel {
             extensionsModel.clear();
             summaryLabel.setText(unsupportedSummary());
             directoriesLabel.setText(unsupportedActionHint());
-            mostrarPlaceholderDetalles("Sin gestion de " + extensionPluralLower());
+            mostrarPlaceholderDetalles("Sin gestión de " + extensionPluralLower());
             refreshLayout();
             return;
         }

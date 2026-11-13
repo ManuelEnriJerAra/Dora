@@ -46,6 +46,13 @@ Important helper areas in `PanelConfigServidor`:
 - RAM slider/spinner synchronization
 - field kind detection and normalization
 
+Display rules (keep `server.properties` values in English, show them in Spanish):
+
+- `FIELD_LABELS` is looked up lower-case first, so every known key gets a Spanish label; unknown keys fall back to the title-cased key.
+- `etiquetaValor(...)` turns stored values such as `peaceful` or `survival` into Spanish text in the difficulty and game mode combos. Only the renderer changes; the combo still holds the English value that is saved.
+- Number spinners use `crearModeloNumerico(...)` (ports 1..65535, counters at least 0) and a `"#"` editor, so ports show as `25565`, not `25,565`.
+- The actions row says that changes apply on the next server restart.
+
 ## Managed Outside Config Panel
 
 Some server/world settings are intentionally managed elsewhere, such as world settings in `PanelMundo`. Do not duplicate controls unless the UX explicitly calls for it.
@@ -68,6 +75,7 @@ When adding a new editor:
 Relevant tests include:
 
 - `PanelServidoresTest`
+- `PanelConfigServidorTextosTest`
 - `PanelExtensionesTest`
 - config-related coverage in controller/model tests
 
