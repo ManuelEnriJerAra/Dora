@@ -60,7 +60,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.time.Duration;
@@ -69,7 +68,6 @@ import java.util.concurrent.TimeUnit;
 import static controlador.PuertosServidor.PUERTO_MAXIMO;
 import static controlador.PuertosServidor.PUERTO_MINECRAFT_DEFECTO;
 import static controlador.PuertosServidor.isPortAvailableForStart;
-import static controlador.PuertosServidor.parsePort;
 import static controlador.PuertosServidor.puertoConfigurado;
 import static controlador.PuertosServidor.resolveServerBindHost;
 
@@ -234,7 +232,7 @@ public class GestorServidores {
                 cambios = true;
                 continue;
             }
-            if (asegurarMetadatosPersistentes(server)) {
+            if (MetadatosServidor.asegurarPersistentes(server)) {
                 cambios = true;
             }
             depurada.add(server);
@@ -267,135 +265,6 @@ public class GestorServidores {
             listaServidores = copiarListaServidoresOrdenada();
         }
         return cambios;
-    }
-
-    private boolean asegurarMetadatosPersistentes(Server server) {
-        boolean cambios = false;
-        if (server.migrarModeloLegacy()) {
-            cambios = true;
-        }
-        if (server.getId() == null || server.getId().isBlank()) {
-            server.setId(UUID.randomUUID().toString());
-            cambios = true;
-        }
-        if (server.getServerConfig() == null) {
-            server.setServerConfig(new ServerConfig());
-            cambios = true;
-        }
-        if (sincronizarPuertoConfigDesdeProperties(server)) {
-            cambios = true;
-        }
-        if (server.getFavorito() == null) {
-            server.setFavorito(Boolean.FALSE);
-            cambios = true;
-        }
-        if (server.getEstadisticasRangoSegundos() == null || server.getEstadisticasRangoSegundos() <= 0) {
-            server.setEstadisticasRangoSegundos(300);
-            cambios = true;
-        }
-        if (server.getEstadisticasPersistenciaActiva() == null) {
-            server.setEstadisticasPersistenciaActiva(Boolean.TRUE);
-            cambios = true;
-        }
-        if (server.getEstadisticasVentanaRecienteSegundos() == null || server.getEstadisticasVentanaRecienteSegundos() <= 0) {
-            server.setEstadisticasVentanaRecienteSegundos(30 * 24 * 60 * 60);
-            cambios = true;
-        }
-        if (server.getEstadisticasResolucionHistoricaSegundos() == null || server.getEstadisticasResolucionHistoricaSegundos() <= 0) {
-            server.setEstadisticasResolucionHistoricaSegundos(60);
-            cambios = true;
-        }
-        if (server.getEstadisticasCpuActiva() == null) {
-            server.setEstadisticasCpuActiva(Boolean.TRUE);
-            cambios = true;
-        }
-        if (server.getEstadisticasCpuHistorial() == null) {
-            server.setEstadisticasCpuHistorial(Boolean.TRUE);
-            cambios = true;
-        }
-        if (server.getEstadisticasRamActiva() == null) {
-            server.setEstadisticasRamActiva(Boolean.TRUE);
-            cambios = true;
-        }
-        if (server.getEstadisticasRamHistorial() == null) {
-            server.setEstadisticasRamHistorial(Boolean.TRUE);
-            cambios = true;
-        }
-        if (server.getEstadisticasDiscoActiva() == null) {
-            server.setEstadisticasDiscoActiva(Boolean.TRUE);
-            cambios = true;
-        }
-        if (server.getEstadisticasDiscoHistorial() == null) {
-            server.setEstadisticasDiscoHistorial(Boolean.TRUE);
-            cambios = true;
-        }
-        if (server.getEstadisticasJugadoresActiva() == null) {
-            server.setEstadisticasJugadoresActiva(Boolean.FALSE);
-            cambios = true;
-        }
-        if (server.getEstadisticasJugadoresHistorial() == null) {
-            server.setEstadisticasJugadoresHistorial(Boolean.TRUE);
-            cambios = true;
-        }
-        if (server.getPreviewRenderProfileId() == null || server.getPreviewRenderProfileId().isBlank()) {
-            server.setPreviewRenderProfileId("quality");
-            cambios = true;
-        }
-        if (server.getPreviewRenderRealtime() == null) {
-            server.setPreviewRenderRealtime(Boolean.FALSE);
-            cambios = true;
-        }
-        if (server.getPreviewShowSpawn() == null) {
-            server.setPreviewShowSpawn(Boolean.FALSE);
-            cambios = true;
-        }
-        if (server.getPreviewShowPlayers() == null) {
-            server.setPreviewShowPlayers(Boolean.FALSE);
-            cambios = true;
-        }
-        if (server.getPreviewShowChunkGrid() == null) {
-            server.setPreviewShowChunkGrid(Boolean.FALSE);
-            cambios = true;
-        }
-        if (server.getPreviewUseWholeMap() == null) {
-            server.setPreviewUseWholeMap(Boolean.FALSE);
-            cambios = true;
-        }
-        if (server.getPreviewRenderLimitPixels() == null || server.getPreviewRenderLimitPixels() < 0) {
-            server.setPreviewRenderLimitPixels(256);
-            cambios = true;
-        }
-        if (server.getPreviewRenderCenterId() == null || server.getPreviewRenderCenterId().isBlank()) {
-            server.setPreviewRenderCenterId("spawn");
-            cambios = true;
-        }
-        return cambios;
-    }
-
-    private boolean sincronizarPuertoConfigDesdeProperties(Server server) {
-        if (server == null || server.getServerConfig() == null || server.getServerDir() == null || server.getServerDir().isBlank()) {
-            return false;
-        }
-        Path propertiesPath;
-        try {
-            propertiesPath = Path.of(server.getServerDir()).resolve("server.properties");
-        } catch (RuntimeException e) {
-            return false;
-        }
-        if (!Files.isRegularFile(propertiesPath)) {
-            return false;
-        }
-        try {
-            Properties properties = Utilidades.cargarPropertiesUtf8(propertiesPath);
-            Integer propertiesPort = parsePort(properties.getProperty("server-port"));
-            if (propertiesPort == null || propertiesPort == server.getServerConfig().getPuerto()) {
-                return false;
-            }
-            server.getServerConfig().setPuerto(propertiesPort);
-            return true;
-        } catch (IOException | RuntimeException e) {
-            return false;
-        }
     }
 
     boolean sincronizarExtensionesServidor(Server server) throws IOException {
@@ -1268,7 +1137,7 @@ public class GestorServidores {
             listaServidores = new ArrayList<>();
         }
 
-        asegurarMetadatosPersistentes(server);
+        MetadatosServidor.asegurarPersistentes(server);
 
         int indiceExistente = -1;
         for (int i = 0; i < listaServidores.size(); i++) {
@@ -1553,7 +1422,7 @@ public class GestorServidores {
 
         // Creo un proceso con la dirección del servidor y la RAM elegida y en el primer puerto que esté libre desde 25565
         ServerConfig serverConfig = asegurarServerConfig(server);
-        sincronizarPuertoConfigDesdeProperties(server);
+        MetadatosServidor.sincronizarPuertoDesdeProperties(server);
         Object resolucionPuerto = resolverPuertoParaInicio(server, serverConfig, puertoElegido);
         if (resolucionPuerto instanceof SolicitudPuertoInicio solicitud) {
             return solicitud;
