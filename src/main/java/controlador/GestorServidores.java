@@ -1003,7 +1003,7 @@ public class GestorServidores {
         if (server.getVersion() == null || server.getVersion().isBlank()) {
             server.setVersion(DetectorVersionServidor.detectarVersionVanilla(server));
         }
-        server.setDisplayName(construirNombreServidorImportado(server.getVersion(), server.getServerDir(), false));
+        server.setDisplayName(construirNombreDesdeCarpeta(server.getVersion(), server.getServerDir()));
 
         guardarServidor(server);
         GestorMundos.sincronizarMundosServidor(server);
@@ -1277,6 +1277,38 @@ public class GestorServidores {
             return base;
         }
         return base + " (" + duplicadosExistentes + ")";
+    }
+
+    // Nombres de carpeta que no dicen nada del servidor; con ellos se usa "Servidor <versión>".
+    private static final java.util.Set<String> CARPETAS_GENERICAS = java.util.Set.of(
+            "server", "servers", "servidor", "servidores", "minecraft", "minecraft-server",
+            "minecraft_server", "mc", "mcserver", "mc-server", "servidor importado"
+    );
+
+    // Al importar una carpeta existente, su nombre suele ser el que el usuario reconoce
+    // ("Survival", "Modpack amigos"), así que se prefiere al genérico "Servidor 1.21.4".
+    String construirNombreDesdeCarpeta(String version, String serverDir) {
+        String carpeta = nombreCarpetaServidor(serverDir).trim();
+        if (carpeta.isBlank() || CARPETAS_GENERICAS.contains(carpeta.toLowerCase(java.util.Locale.ROOT))) {
+            return construirNombreServidorImportado(version, serverDir, false);
+        }
+        java.util.Set<String> usados = new java.util.HashSet<>();
+        if (listaServidores != null) {
+            for (Server existente : listaServidores) {
+                if (existente == null || existente.getDisplayName() == null) continue;
+                if (serverDir != null && serverDir.equals(existente.getServerDir())) continue;
+                usados.add(existente.getDisplayName().trim().toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+        if (!usados.contains(carpeta.toLowerCase(java.util.Locale.ROOT))) {
+            return carpeta;
+        }
+        for (int i = 1; ; i++) {
+            String candidato = carpeta + " (" + i + ")";
+            if (!usados.contains(candidato.toLowerCase(java.util.Locale.ROOT))) {
+                return candidato;
+            }
+        }
     }
 
     private String normalizarVersionNombre(String version) {

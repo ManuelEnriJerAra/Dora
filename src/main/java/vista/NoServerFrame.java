@@ -31,7 +31,6 @@ public class NoServerFrame extends JFrame {
     private static final int LEFT_PANEL_WIDTH = 286;
     private static final int ACTION_BUTTON_TARGET_WIDTH = 170;
     private static final int ACTION_BUTTON_TARGET_HEIGHT = 42;
-    private static final int LINK_BUTTON_TARGET_WIDTH = 220;
     private static final int LINK_BUTTON_TARGET_HEIGHT = 38;
     private static final Insets OUTER_INSETS = new Insets(8, 8, 8, 8);
     private static final Insets SURFACE_INSETS = new Insets(0, 8, 8, 8);
@@ -54,7 +53,7 @@ public class NoServerFrame extends JFrame {
             }
         });
 
-        logo = cargarLogo(128);
+        logo = cargarLogo(104);
         setContentPane(crearContenido(gestorServidores));
     }
 
@@ -99,7 +98,7 @@ public class NoServerFrame extends JFrame {
         c.anchor = GridBagConstraints.NORTHWEST;
 
         JLabel logoLabel = new JLabel(logo);
-        c.insets = new Insets(0, 0, 20, 0);
+        c.insets = new Insets(8, 0, 12, 0);
         panel.add(logoLabel, c);
 
         JLabel nombreAppLabel = new JLabel("Dora");
@@ -113,7 +112,7 @@ public class NoServerFrame extends JFrame {
         subtituloLabel.setFont(subtituloLabel.getFont().deriveFont(Font.PLAIN, 14f));
         subtituloLabel.setForeground(AppTheme.getMutedForeground());
         c.gridy++;
-        c.insets = new Insets(0, 0, 26, 0);
+        c.insets = new Insets(0, 0, 16, 0);
         panel.add(subtituloLabel, c);
 
         JComponent autorLabel = crearTextoEnvolvente(
@@ -144,15 +143,12 @@ public class NoServerFrame extends JFrame {
         c.fill = GridBagConstraints.BOTH;
         panel.add(Box.createVerticalGlue(), c);
 
-        JPanel enlaces = new JPanel();
+        // Rejilla 2x2: en una columna los cuatro enlaces no cabían a 920x620 y se cortaba LinkedIn/Reddit.
+        JPanel enlaces = new JPanel(new GridLayout(2, 2, 8, 8));
         enlaces.setOpaque(false);
-        enlaces.setLayout(new BoxLayout(enlaces, BoxLayout.Y_AXIS));
         enlaces.add(crearLinkButton("Ko-fi", "doraicons/ko-fi.svg", DoraAboutLinks.KOFI_URL, "Abrir Ko-fi"));
-        enlaces.add(Box.createVerticalStrut(8));
         enlaces.add(crearLinkButton("GitHub", "doraicons/github.svg", DoraAboutLinks.GITHUB_URL, "Abrir repositorio de Dora"));
-        enlaces.add(Box.createVerticalStrut(8));
         enlaces.add(crearLinkButton("LinkedIn", "doraicons/linkedin.svg", DoraAboutLinks.LINKEDIN_URL, "Abrir perfil de LinkedIn"));
-        enlaces.add(Box.createVerticalStrut(8));
         enlaces.add(crearLinkButton("Reddit", "doraicons/reddit.svg", DoraAboutLinks.REDDIT_URL, "Abrir perfil de Reddit"));
 
         c.gridy++;
@@ -417,13 +413,10 @@ public class NoServerFrame extends JFrame {
         button.setIconTextGap(10);
         AppTheme.applyActionButtonStyle(button);
         Dimension preferred = button.getPreferredSize();
-        Dimension size = new Dimension(
-                Math.max(LINK_BUTTON_TARGET_WIDTH, preferred.width),
-                Math.max(LINK_BUTTON_TARGET_HEIGHT, preferred.height)
-        );
-        button.setPreferredSize(size);
-        button.setMinimumSize(size);
-        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, size.height));
+        int height = Math.max(LINK_BUTTON_TARGET_HEIGHT, preferred.height);
+        button.setPreferredSize(new Dimension(preferred.width, height));
+        button.setMinimumSize(new Dimension(0, height));
+        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
         button.addActionListener(e -> abrirEnlace(url));
         return button;
     }

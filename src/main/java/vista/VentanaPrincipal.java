@@ -229,15 +229,24 @@ public class VentanaPrincipal extends JFrame {
                 }
             }
         });
-        importarServerButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                Server server = gestorServidores.importarServidor();
-                if(server != null){
-                    listaServidoresPanel.refrescarListado();
-                    seleccionarServidor(server);
-                }
+        // Importar abre un menú: una carpeta de servidor existente o un modpack.
+        JPopupMenu menuImportar = new JPopupMenu();
+        JMenuItem importarCarpetaItem = new JMenuItem("Carpeta de servidor...");
+        importarCarpetaItem.setToolTipText("Añadir a Dora un servidor que ya tienes en el disco");
+        importarCarpetaItem.addActionListener(e -> {
+            Server server = gestorServidores.importarServidor();
+            if(server != null){
+                listaServidoresPanel.refrescarListado();
+                seleccionarServidor(server);
             }
         });
+        JMenuItem importarModpackItem = new JMenuItem("Modpack (.mrpack o .zip)...");
+        importarModpackItem.setToolTipText("Instalar un modpack de Modrinth o CurseForge en un servidor de mods");
+        importarModpackItem.addActionListener(e -> importarModpackDesdeLista());
+        menuImportar.add(importarCarpetaItem);
+        menuImportar.add(importarModpackItem);
+        importarServerButton.addActionListener(e ->
+                menuImportar.show(importarServerButton, 0, -menuImportar.getPreferredSize().height));
         borrarServerButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 Server server = gestorServidores.getServidorSeleccionado();
@@ -1412,6 +1421,88 @@ public class VentanaPrincipal extends JFrame {
         }
 
         setPaginaDerecha(pagina);
+    }
+
+    private void importarModpackDesdeLista(){
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Importar modpack");
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Modpacks Modrinth o CurseForge", "mrpack", "zip"));
+        if(chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        java.nio.file.Path pack = chooser.getSelectedFile().toPath();
+
+        String requisitos = describirRequisitosModpack(pack);
+        Server destino = gestorServidores.getServidorSeleccionado();
+        boolean destinoValido = destino != null
+                && PanelExtensiones.supportsModpackActions(PanelExtensiones.ecosystemOf(destino))
+                && modpackCompatibleCon(pack, destino);
+        if(!destinoValido){
+            String mensaje = "Los modpacks se instalan en un servidor de mods (Fabric, Forge, NeoForge o Quilt)"
+                    + (requisitos == null ? "." : ".\nEste modpack necesita " + requisitos + ".")
+                    + "\n\nCrea un servidor con esa versión y Dora instalará el modpack en él.";
+            Object[] opciones = {"Crear servidor", "Cancelar"};
+            int eleccion = JOptionPane.showOptionDialog(this, mensaje, "Importar modpack",
+                    JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, opciones, opciones[0]);
+            if(eleccion != 0) return;
+            destino = gestorServidores.crearServidor();
+            if(destino == null) return;
+            listaServidoresPanel.refrescarListado();
+            if(!PanelExtensiones.supportsModpackActions(PanelExtensiones.ecosystemOf(destino))){
+                JOptionPane.showMessageDialog(this,
+                        "El servidor creado no admite mods, así que no se ha instalado el modpack.",
+                        "Importar modpack", JOptionPane.WARNING_MESSAGE);
+                seleccionarServidor(destino);
+                return;
+            }
+        }
+        abrirPaginaServidor(destino, PaginaDerecha.EXTENSIONES);
+        if(paginaDerechaActual == PaginaDerecha.EXTENSIONES
+                && esMismoServidor(gestorServidores.getServidorSeleccionado(), destino)
+                && contenidoDerechoActual != null
+                && contenidoDerechoActual.extensionesPanel() instanceof PanelExtensiones panelExtensiones){
+            panelExtensiones.importarModpackDesdeArchivo(pack);
+        }
+    }
+
+    // "Minecraft 1.20.1 con Fabric 0.15.11", o null si el archivo no es un .mrpack legible.
+    static String describirRequisitosModpack(java.nio.file.Path pack){
+        try{
+            if(pack == null || !pack.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".mrpack")) return null;
+            Map<String, String> deps = new controlador.extensions.ModrinthModpackService().readIndex(pack).dependencies();
+            return describirRequisitos(deps);
+        } catch (IOException | RuntimeException ex){
+            return null;
+        }
+    }
+
+    static String describirRequisitos(Map<String, String> deps){
+        if(deps == null || deps.isEmpty()) return null;
+        StringBuilder texto = new StringBuilder();
+        String minecraft = deps.get("minecraft");
+        if(minecraft != null) texto.append("Minecraft ").append(minecraft);
+        for(Map.Entry<String, String> dep : deps.entrySet()){
+            String nombre = switch (dep.getKey()) {
+                case "fabric-loader" -> "Fabric";
+                case "quilt-loader" -> "Quilt";
+                case "forge" -> "Forge";
+                case "neoforge" -> "NeoForge";
+                default -> null;
+            };
+            if(nombre == null) continue;
+            if(!texto.isEmpty()) texto.append(" con ");
+            texto.append(nombre).append(' ').append(dep.getValue());
+        }
+        return texto.isEmpty() ? null : texto.toString();
+    }
+
+    private static boolean modpackCompatibleCon(java.nio.file.Path pack, Server server){
+        try{
+            if(!pack.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".mrpack")) return true;
+            controlador.extensions.ModrinthModpackService service = new controlador.extensions.ModrinthModpackService();
+            return service.validateDependencies(service.readIndex(pack), server).isEmpty();
+        } catch (IOException | RuntimeException ex){
+            // Si no se puede leer aquí, la importación normal mostrará el error.
+            return true;
+        }
     }
 
     private void navegarAPaginaDerecha(PaginaDerecha pagina){

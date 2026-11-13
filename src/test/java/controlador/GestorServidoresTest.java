@@ -455,9 +455,29 @@ class GestorServidoresTest {
     }
 
     @Test
-    void importarServidorDesdeDirectorio_noDebeSufijarConCeroSiNoHayDuplicados() throws Exception {
+    void importarServidorDesdeDirectorio_usaElNombreDeLaCarpeta() throws Exception {
         GestorServidores gestor = new GestorServidores(tempDir.resolve("ServerList.json").toFile());
-        Path firstDir = tempDir.resolve("first-server");
+        Path firstDir = tempDir.resolve("Survival amigos");
+        TestWorldFixtures.createValidServerJar(firstDir, "server.jar", "{\"id\":\"1.20.1\"}");
+
+        Server first = gestor.importarServidorDesdeDirectorio(firstDir);
+
+        assertThat(first).isNotNull();
+        assertThat(first.getDisplayName()).isEqualTo("Survival amigos");
+
+        Path secondDir = tempDir.resolve("otra").resolve("Survival amigos");
+        TestWorldFixtures.createValidServerJar(secondDir, "server.jar", "{\"id\":\"1.20.1\"}");
+
+        Server second = gestor.importarServidorDesdeDirectorio(secondDir);
+
+        assertThat(second).isNotNull();
+        assertThat(second.getDisplayName()).isEqualTo("Survival amigos (1)");
+    }
+
+    @Test
+    void importarServidorDesdeDirectorio_conCarpetaGenericaUsaLaVersionSinSufijoCero() throws Exception {
+        GestorServidores gestor = new GestorServidores(tempDir.resolve("ServerList.json").toFile());
+        Path firstDir = tempDir.resolve("a").resolve("server");
         TestWorldFixtures.createValidServerJar(firstDir, "server.jar", "{\"id\":\"1.20.1\"}");
 
         Server first = gestor.importarServidorDesdeDirectorio(firstDir);
@@ -465,7 +485,7 @@ class GestorServidoresTest {
         assertThat(first).isNotNull();
         assertThat(first.getDisplayName()).isEqualTo("Servidor 1.20.1");
 
-        Path secondDir = tempDir.resolve("second-server");
+        Path secondDir = tempDir.resolve("b").resolve("minecraft");
         TestWorldFixtures.createValidServerJar(secondDir, "server.jar", "{\"id\":\"1.20.1\"}");
 
         Server second = gestor.importarServidorDesdeDirectorio(secondDir);

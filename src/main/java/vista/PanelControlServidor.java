@@ -321,7 +321,8 @@ public Dimension getMaximumSize() {
             return;
         }
         AppTheme.applyLargeControlButtonStyle(button, flatIcon);
-        flatIcon.setColorFilter(new FlatSVGIcon.ColorFilter(color -> Color.WHITE));
+        Color colorIcono = button.getForeground();
+        flatIcon.setColorFilter(new FlatSVGIcon.ColorFilter(color -> colorIcono));
     }
 
 }

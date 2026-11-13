@@ -1037,7 +1037,18 @@ final class PanelExtensiones extends JPanel {
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }
-        Path sourceZip = chooser.getSelectedFile().toPath();
+        importarModpackDesdeArchivo(chooser.getSelectedFile().toPath());
+    }
+
+    /** Importa un modpack ya elegido; también se usa desde el botón Importar de la lista de servidores. */
+    void importarModpackDesdeArchivo(Path sourceZip) {
+        if (sourceZip == null) {
+            return;
+        }
+        if (!supportsModpackActions(currentEcosystem())) {
+            JOptionPane.showMessageDialog(this, "La importación de modpacks solo está disponible para servidores de mods.", "Mods", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         boolean modrinthPack = sourceZip.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".mrpack");
         ModpackPreflightWorker worker = new ModpackPreflightWorker(sourceZip, modrinthPack);
         JDialog loadingDialog = createModpackLoadingDialog(

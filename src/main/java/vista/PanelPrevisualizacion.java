@@ -64,6 +64,7 @@ import com.formdev.flatlaf.extras.components.FlatScrollPane;
 import com.formdev.flatlaf.extras.components.FlatTextField;
 
 import controlador.GestorServidores;
+import controlador.IPLocal;
 import controlador.IPPublica;
 import controlador.Utilidades;
 import controlador.world.WorldPreviewCatalogService;
@@ -314,11 +315,25 @@ public class PanelPrevisualizacion extends JPanel {
         Runnable actualizarTextoIp = () -> {
             String ip = (String) ipServidor.getClientProperty("ipPublica");
             if(ip == null || ip.isBlank()){
-                ipServidor.putClientProperty("fullText", "(sin conexión)");
-                ipServidor.putClientProperty("copyText", null);
+                // Sin IP pública (sin internet o aún buscándola): se muestra la dirección de la red local,
+                // que sirve para jugar desde la misma red.
+                String ipLocal = (String) ipServidor.getClientProperty("ipLocal");
+                if(ipLocal == null || ipLocal.isBlank()){
+                    ipServidor.putClientProperty("fullText", "(buscando dirección...)");
+                    ipServidor.putClientProperty("copyText", null);
+                    ipServidor.setToolTipText(null);
+                    SwingUtilities.invokeLater(ajustarInfoServidor);
+                    return;
+                }
+                int puertoLocal = resolveCurrentServerPort();
+                String direccion = puertoLocal > 0 ? (ipLocal + ":" + puertoLocal) : ipLocal;
+                ipServidor.putClientProperty("fullText", direccion + " (red local)");
+                ipServidor.putClientProperty("copyText", direccion);
+                ipServidor.setToolTipText("Sin IP pública. Esta dirección sirve para conectarse desde tu red local. Haz clic para copiarla.");
                 SwingUtilities.invokeLater(ajustarInfoServidor);
                 return;
             }
+            ipServidor.setToolTipText("Dirección pública. Haz clic para copiarla.");
             int puerto = resolveCurrentServerPort();
             String texto = puerto > 0 ? (ip + ":" + puerto) : (ip + ":(sin puerto)");
             ipServidor.putClientProperty("fullText", texto);
@@ -326,6 +341,10 @@ public class PanelPrevisualizacion extends JPanel {
             SwingUtilities.invokeLater(ajustarInfoServidor);
         };
 
+        IPLocal.getAsync(ipLocal -> {
+            ipServidor.putClientProperty("ipLocal", ipLocal);
+            actualizarTextoIp.run();
+        });
         IPPublica.getAsync(ip -> {
             ipServidor.putClientProperty("ipPublica", ip);
             actualizarTextoIp.run();
