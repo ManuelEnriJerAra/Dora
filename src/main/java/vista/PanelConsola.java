@@ -420,8 +420,8 @@ public class PanelConsola extends JPanel {
         }
 
         // Chat
-        Matcher mChat = CHAT.matcher(linea);
-        if(mChat.find()){
+        Matcher mChat = linea.indexOf('<') >= 0 ? CHAT.matcher(linea) : null;
+        if(mChat != null && mChat.find()){
             String user = mChat.group(1);
             if(user != null) user = user.trim();
             if(user == null || user.isBlank() || !jugadoresConectados.contains(user)) return null;
@@ -432,12 +432,14 @@ public class PanelConsola extends JPanel {
         }
 
         // Join / Leave
-        Matcher mJoin = JOIN.matcher(linea);
-        if(mJoin.find()){
+        // contains() descarta casi todas las líneas sin pasar por la expresión regular, que es lenta
+        // porque prueba cada posición de la línea.
+        Matcher mJoin = linea.contains(" joined the game") ? JOIN.matcher(linea) : null;
+        if(mJoin != null && mJoin.find()){
             return(hora+"[INFO] "+mJoin.group(1)+" ha entrado.");
         }
-        Matcher mLeft = LEFT.matcher(linea);
-        if(mLeft.find()){
+        Matcher mLeft = linea.contains(" left the game") ? LEFT.matcher(linea) : null;
+        if(mLeft != null && mLeft.find()){
             return (hora+"[INFO] "+mLeft.group(1)+" ha salido.");
         }
         return null;
@@ -446,8 +448,8 @@ public class PanelConsola extends JPanel {
     private void actualizarJugadoresConectados(String linea){
         if(linea == null || linea.isBlank()) return;
 
-        Matcher mJoin = JOIN.matcher(linea);
-        if(mJoin.find()){
+        Matcher mJoin = linea.contains(" joined the game") ? JOIN.matcher(linea) : null;
+        if(mJoin != null && mJoin.find()){
             String nombre = mJoin.group(1);
             if(nombre != null){
                 nombre = nombre.trim();
@@ -458,8 +460,8 @@ public class PanelConsola extends JPanel {
             return;
         }
 
-        Matcher mLeft = LEFT.matcher(linea);
-        if(mLeft.find()){
+        Matcher mLeft = linea.contains(" left the game") ? LEFT.matcher(linea) : null;
+        if(mLeft != null && mLeft.find()){
             String nombre = mLeft.group(1);
             if(nombre != null){
                 nombre = nombre.trim();

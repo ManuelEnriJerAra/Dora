@@ -1084,7 +1084,11 @@ public class PanelServidores extends FlatScrollPane {
         boolean iniciando = vivo && !deteniendo && Boolean.TRUE.equals(server.getIniciando());
         String dotColor = (iniciando || deteniendo) ? "#FF9800" : (vivo ? "#00C853" : "#D50000");
         String texto = deteniendo ? "Deteniendo" : (iniciando ? "Iniciando" : (vivo ? "Activo" : "Inactivo"));
-        estado.setText("<html><span style='color:" + dotColor + ";'>●</span> " + texto + "</html>");
+        String html = "<html><span style='color:" + dotColor + ";'>●</span> " + texto + "</html>";
+        // setText con HTML vuelve a parsear y a maquetar la fila; solo se hace si el estado cambió.
+        if(!html.equals(estado.getText())){
+            estado.setText(html);
+        }
     }
 
     private JButton crearBotonFavorito(Server servidor, JPanel fila){

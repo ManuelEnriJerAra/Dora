@@ -331,7 +331,14 @@ public class PanelPrevisualizacion extends JPanel {
             actualizarTextoIp.run();
         });
 
-        Timer refreshPuertoTimer = new Timer(500, e -> actualizarTextoIp.run());
+        // Antes se releía server.properties cada 500 ms. Ahora los cambios hechos desde Dora llegan
+        // por el evento "configuracionServidor" y para ediciones a mano basta con mirar la fecha
+        // de modificación del archivo cada pocos segundos.
+        Timer refreshPuertoTimer = new Timer(3000, e -> {
+            if(puertoCache.haCambiado(resolveCurrentServerPropertiesPath())){
+                actualizarTextoIp.run();
+            }
+        });
         refreshPuertoTimer.setRepeats(true);
         refreshPuertoTimer.start();
 
@@ -428,11 +435,48 @@ public class PanelPrevisualizacion extends JPanel {
         });
     }
 
+    private final PuertoPropertiesCache puertoCache = new PuertoPropertiesCache();
+
+    private Path resolveCurrentServerPropertiesPath() {
+        Server current = resolveCurrentServer();
+        if(current == null || current.getServerDir() == null || current.getServerDir().isBlank()){
+            return null;
+        }
+        try{
+            return Path.of(current.getServerDir()).resolve("server.properties");
+        } catch (RuntimeException ex){
+            return null;
+        }
+    }
+
+    /** Recuerda qué archivo y qué fecha de modificación se leyeron por última vez. */
+    static final class PuertoPropertiesCache {
+        private Path ruta;
+        private long modificado = Long.MIN_VALUE;
+
+        boolean haCambiado(Path nuevaRuta) {
+            long mtime = Long.MIN_VALUE;
+            if(nuevaRuta != null){
+                try{
+                    mtime = Files.getLastModifiedTime(nuevaRuta).toMillis();
+                } catch (IOException | RuntimeException ex){
+                    mtime = -1L;
+                }
+            }
+            boolean cambiado = !java.util.Objects.equals(ruta, nuevaRuta) || mtime != modificado;
+            ruta = nuevaRuta;
+            modificado = mtime;
+            return cambiado;
+        }
+    }
+
     private int resolveCurrentServerPort() {
         Server current = resolveCurrentServer();
-        if(current != null && current.getServerDir() != null && !current.getServerDir().isBlank()){
+        Path propertiesPath = resolveCurrentServerPropertiesPath();
+        puertoCache.haCambiado(propertiesPath);
+        if(current != null && propertiesPath != null){
             try{
-                Properties properties = Utilidades.cargarPropertiesUtf8(Path.of(current.getServerDir()).resolve("server.properties"));
+                Properties properties = Utilidades.cargarPropertiesUtf8(propertiesPath);
                 String value = properties.getProperty("server-port");
                 if(value != null && !value.isBlank()){
                     int parsed = Integer.parseInt(value.strip());

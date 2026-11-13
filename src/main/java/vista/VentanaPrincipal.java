@@ -357,10 +357,11 @@ public class VentanaPrincipal extends JFrame {
             }
         });
 
-        new Timer(1000, e -> {
-            // actualizar estado cada 1 segúndo
-            listaServidoresPanel.actualizarEstados();
-        }).start();
+        // El estado de la lista se actualiza con cada cambio de estado de un servidor. El temporizador
+        // lento solo cubre casos sin evento, como un proceso que muere sin pasar por Dora.
+        gestorServidores.addPropertyChangeListener("estadoServidor",
+                evt -> SwingUtilities.invokeLater(listaServidoresPanel::actualizarEstados));
+        new Timer(5000, e -> listaServidoresPanel.actualizarEstados()).start();
 
         // Si se vacia la lista por cualquier via, volvemos al dialogo inicial
         gestorServidores.addPropertyChangeListener("listaServidores", evt -> {

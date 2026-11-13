@@ -600,6 +600,7 @@ public class PanelMundo extends JPanel {
             allowCommandsValueLabel.setText("-");
             gameRulesValueLabel.setText("-");
             dataPacksValueLabel.setText("-");
+            almacenamientoSequence.incrementAndGet();
             pesoMundoValueLabel.setText("-");
             pesoStatsSavesValueLabel.setText("-");
             pesoTotalValueLabel.setText("-");
@@ -696,6 +697,7 @@ public class PanelMundo extends JPanel {
         updatingWorldSettingsControls = false;
         markCurrentWorldSettingsAsPersisted();
         updateWorldSettingsSaveButtonState();
+        almacenamientoSequence.incrementAndGet();
         pesoMundoValueLabel.setText("-");
         pesoStatsSavesValueLabel.setText("-");
         pesoTotalValueLabel.setText("-");
@@ -1165,7 +1167,18 @@ public class PanelMundo extends JPanel {
         }
     }
 
+    // Recorrer la carpeta del mundo puede tardar segundos en mundos grandes o discos lentos,
+    // así que se hace fuera del EDT. El contador descarta resultados de un mundo anterior.
+    private static final java.util.concurrent.ExecutorService ALMACENAMIENTO_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "dora-world-size");
+                t.setDaemon(true);
+                return t;
+            });
+    private final AtomicLong almacenamientoSequence = new AtomicLong();
+
     private void actualizarDatosAlmacenamiento() {
+        long secuencia = almacenamientoSequence.incrementAndGet();
         World mundo = getMundoSeleccionadoOActivo();
         if (mundo == null || mundo.getWorldDir() == null || mundo.getWorldDir().isBlank()) {
             pesoMundoValueLabel.setText("-");
@@ -1174,10 +1187,32 @@ public class PanelMundo extends JPanel {
             return;
         }
 
-        WorldStorageStats storageStats = WorldStorageAnalyzer.analyze(mundo);
-        pesoMundoValueLabel.setText(formatearTamano(storageStats.worldBytes()));
-        pesoStatsSavesValueLabel.setText(formatearTamano(storageStats.playerAndStatsBytes()));
-        pesoTotalValueLabel.setText(formatearTamano(storageStats.totalBytes()));
+        pesoMundoValueLabel.setText("Calculando...");
+        pesoStatsSavesValueLabel.setText("Calculando...");
+        pesoTotalValueLabel.setText("Calculando...");
+        ALMACENAMIENTO_EXECUTOR.execute(() -> {
+            WorldStorageStats storageStats;
+            try {
+                storageStats = WorldStorageAnalyzer.analyze(mundo);
+            } catch (RuntimeException ex) {
+                storageStats = null;
+            }
+            WorldStorageStats resultado = storageStats;
+            SwingUtilities.invokeLater(() -> {
+                if (secuencia != almacenamientoSequence.get()) {
+                    return;
+                }
+                if (resultado == null) {
+                    pesoMundoValueLabel.setText("-");
+                    pesoStatsSavesValueLabel.setText("-");
+                    pesoTotalValueLabel.setText("-");
+                    return;
+                }
+                pesoMundoValueLabel.setText(formatearTamano(resultado.worldBytes()));
+                pesoStatsSavesValueLabel.setText(formatearTamano(resultado.playerAndStatsBytes()));
+                pesoTotalValueLabel.setText(formatearTamano(resultado.totalBytes()));
+            });
+        });
     }
 
     private List<PreviewPlayerData> obtenerJugadoresRecientesDesdePlayerdata(Server server, World mundo) {

@@ -228,7 +228,8 @@ final class ArranqueServidor {
 
         } catch (IOException e) {
             server.setIniciando(false);
-            server.appendConsoleLinea("[ERROR] El servidor no se pudo iniciar"+e.getMessage());
+            SwingUtilities.invokeLater(() -> gestor.notificarEstadoServidor(server));
+            server.appendConsoleLinea("[ERROR] El servidor no se pudo iniciar: "+e.getMessage());
             AppErrorReporter.report("El proceso del servidor no se pudo iniciar.", e);
         }
         return null;
