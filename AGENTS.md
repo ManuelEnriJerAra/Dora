@@ -90,7 +90,7 @@ See `docs/pipelines/debug-mode-pipeline.md` before changing Debug mode behavior.
 
 ## Server Creation Wizard
 
-Server creation lives mostly in `controlador.GestorServidores`, including the modal wizard and validation flow.
+The server creation wizard and its validation live in `controlador.AsistenteCreacionServidor`; `controlador.GestorServidores.crearServidor()` opens it and installs the result.
 
 When editing the folder-name step:
 

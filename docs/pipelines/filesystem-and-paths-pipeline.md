@@ -17,7 +17,7 @@ Use this guide before editing file operations, imports/exports, backups, paths, 
 `GestorServidores` owns most server-level directory operations:
 
 - import existing server
-- create new server
+- create new server (the wizard itself is `AsistenteCreacionServidor`)
 - backup/preserve files
 - remove from app
 - delete when explicitly requested
@@ -55,7 +55,7 @@ Extension directories are resolved through platform adapters. Do not hard-code `
 
 ## Backups And Preservation
 
-When changing conversion/upgrade flows, inspect preservation lists in `GestorServidores`, such as preservable config files and extension directories.
+When changing conversion/upgrade flows, inspect `ConversorPlataformaServidor` and the preservation lists in `ConversionPreservationHelper`, such as preservable config files and extension directories.
 
 Server conversion asks the user whether to create a full durable backup. Skipping that backup must not skip preservation: use a temporary preservation snapshot for config files, worlds, and extension folders, then delete the temporary snapshot after conversion completes.
 
