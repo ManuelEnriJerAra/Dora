@@ -53,7 +53,7 @@ class MojangAPITest {
         IOException exception = new IOException("java.net.SocketTimeoutException: Read timed out",
                 new SocketTimeoutException("Read timed out"));
 
-        assertThat(GestorServidores.mensajeErrorDescarga(exception))
+        assertThat(ErroresDescarga.mensaje(exception))
                 .isEqualTo("La descarga ha tardado demasiado. Comprueba tu conexión e inténtalo de nuevo.");
     }
 

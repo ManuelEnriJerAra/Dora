@@ -62,7 +62,6 @@ import java.io.*;
 
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
-import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -79,13 +78,11 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
-
 
 @Getter
 @Setter
@@ -1861,7 +1858,7 @@ public class GestorServidores {
 
     private List<ServerCreationOption> cargarOpcionesCreacion(ServerPlatformAdapter adapter) {
         try {
-            return ejecutarTareaConDialogo(
+            return DialogoTareaEnCurso.ejecutar(
                     "Cargando versiones",
                     "Consultando versiones disponibles de " + adapter.getCreationDisplayName() + "...",
                     adapter::listCreationOptions
@@ -1895,7 +1892,7 @@ public class GestorServidores {
             return List.of();
         }
         try {
-            return ejecutarTareaConDialogo(
+            return DialogoTareaEnCurso.ejecutar(
                     "Cargando versiones",
                     "Consultando conversiones compatibles con Minecraft " + textoODesconocido(server == null ? null : server.getVersion()) + "...",
                     () -> evaluarDisponibilidadConversion(server, targetAdapters)
@@ -2068,7 +2065,7 @@ public class GestorServidores {
         }
 
         try {
-            ejecutarTareaConDialogo(
+            DialogoTareaEnCurso.ejecutar(
                     "Instalando " + adapter.getCreationDisplayName(),
                     "Preparando servidor " + option.displayName() + "...",
                     () -> {
@@ -2088,7 +2085,7 @@ public class GestorServidores {
         } catch (IOException e) {
             JOptionPane.showMessageDialog(
                     null,
-                    "No se ha podido instalar el servidor: " + mensajeErrorDescarga(e),
+                    "No se ha podido instalar el servidor: " + ErroresDescarga.mensaje(e),
                     "Instalación",
                     JOptionPane.ERROR_MESSAGE
             );
@@ -2144,7 +2141,7 @@ public class GestorServidores {
                     : option.platform().getDefaultEcosystemType();
             preservationSnapshot = ConversionPreservationHelper.prepare(serverDir, option.platform(), createBackup);
 
-            ejecutarTareaConDialogo(
+            DialogoTareaEnCurso.ejecutar(
                     "Convirtiendo servidor",
                     "Instalando " + option.displayName() + " sobre el servidor actual...",
                     () -> {
@@ -2217,61 +2214,6 @@ public class GestorServidores {
         }
         sincronizarExtensionesServidor(server);
         serverExtensionsService.persistInstalledExtensionCache(server);
-    }
-
-    private <T> T ejecutarTareaConDialogo(String titulo, String descripcion, Callable<T> task) throws IOException {
-        if (GraphicsEnvironment.isHeadless()) {
-            try {
-                return task.call();
-            } catch (Exception e) {
-                Throwable cause = e.getCause() == null ? e : e.getCause();
-                if (cause instanceof IOException ioException) {
-                    throw ioException;
-                }
-                throw new IOException(cause.getMessage(), cause);
-            }
-        }
-
-        final JDialog dialog = new JDialog((Frame) null, titulo, true);
-        dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-
-        JPanel contenido = new JPanel(new BorderLayout(10, 10));
-        contenido.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        JLabel label = new JLabel(descripcion == null ? "Procesando..." : descripcion);
-        JLabel detalle = new JLabel("Por favor espera. La ventana se cerrará al terminar.");
-        detalle.setForeground(AppTheme.getMutedForeground());
-        JProgressBar progreso = AppTheme.createLoadingProgressBar(true);
-        contenido.add(label, BorderLayout.NORTH);
-        contenido.add(detalle, BorderLayout.CENTER);
-        contenido.add(progreso, BorderLayout.SOUTH);
-        dialog.setContentPane(contenido);
-        dialog.setSize(460, 120);
-        dialog.setLocationRelativeTo(null);
-
-        SwingWorker<T, Void> worker = new SwingWorker<>() {
-            @Override
-            protected T doInBackground() throws Exception {
-                return task.call();
-            }
-
-            @Override
-            protected void done() {
-                dialog.dispose();
-            }
-        };
-
-        worker.execute();
-        dialog.setVisible(true);
-
-        try {
-            return worker.get();
-        } catch (Exception e) {
-            Throwable cause = e.getCause() == null ? e : e.getCause();
-            if (cause instanceof IOException ioException) {
-                throw ioException;
-            }
-            throw new IOException(cause.getMessage(), cause);
-        }
     }
 
     private Path resolverIconoPorDefecto() {
@@ -3394,39 +3336,6 @@ public class GestorServidores {
         state.optionsByPlatform.put(state.adapter.getPlatform(), options);
         actualizarListadoVersiones(state, versionListModel, versionList);
         return !versionListModel.isEmpty();
-    }
-
-    static String mensajeErrorDescarga(Throwable throwable) {
-        if (hasCause(throwable, SocketTimeoutException.class)) {
-            return "La descarga ha tardado demasiado. Comprueba tu conexión e inténtalo de nuevo.";
-        }
-        Throwable root = rootCause(throwable);
-        String message = root == null ? null : root.getMessage();
-        if (message == null || message.isBlank()) {
-            message = throwable == null ? null : throwable.getMessage();
-        }
-        return message == null || message.isBlank() ? "Error desconocido." : message;
-    }
-
-    private static boolean hasCause(Throwable throwable, Class<? extends Throwable> type) {
-        Throwable current = throwable;
-        while (current != null) {
-            if (type.isInstance(current)) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
-
-    private static Throwable rootCause(Throwable throwable) {
-        Throwable current = throwable;
-        Throwable previous = null;
-        while (current != null && current != previous) {
-            previous = current;
-            current = current.getCause();
-        }
-        return previous;
     }
 
     private void actualizarListadoVersiones(ServerCreationWizardState state,
