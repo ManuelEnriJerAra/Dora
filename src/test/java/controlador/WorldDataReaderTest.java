@@ -106,7 +106,7 @@ class WorldDataReaderTest {
         TestWorldFixtures.writeLevelDat(worldDir, data);
 
         assertThat(WorldDataReader.getDayTime(TestWorldFixtures.world(worldDir, "daytime")))
-                .isEqualTo("Dia 1 - 12:00");
+                .isEqualTo("Día 1 - 12:00");
     }
 
     @Test
@@ -156,7 +156,7 @@ class WorldDataReaderTest {
         assertThat(metadata.dataVersion()).isEqualTo("3700");
         assertThat(metadata.seed()).isEqualTo("123");
         assertThat(metadata.spawnPoint()).isEqualTo(new WorldDataReader.SpawnPoint(8, 72, -9, 0f));
-        assertThat(metadata.dayTime()).isEqualTo("Dia 1 - 12:00");
+        assertThat(metadata.dayTime()).isEqualTo("Día 1 - 12:00");
         assertThat(metadata.weatherSummary()).isEqualTo("Lluvia");
         assertThat(metadata.difficulty()).isEqualTo("Normal");
         assertThat(metadata.difficultyLocked()).isEqualTo("✓");
@@ -193,7 +193,7 @@ class WorldDataReaderTest {
         assertThat(metadata.gameMode()).isEqualTo("Creativo");
         assertThat(metadata.difficulty()).isEqualTo("Dificil");
         assertThat(metadata.difficultyLocked()).isNotBlank();
-        assertThat(metadata.dayTime()).isEqualTo("Dia 1 - 12:00");
+        assertThat(metadata.dayTime()).isEqualTo("Día 1 - 12:00");
         assertThat(WorldDataReader.getDifficulty(world)).isEqualTo("Dificil");
     }
 

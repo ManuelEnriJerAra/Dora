@@ -32,6 +32,8 @@ Typical sequence:
 - storage stats
 - recent connections
 
+Storage stats walk the whole world folder, so `actualizarDatosAlmacenamiento()` runs `WorldStorageAnalyzer.analyze(...)` on a background thread and shows "Calculando..." until it finishes. Bump `almacenamientoSequence` whenever the labels are reset so a late result for the previous world is dropped.
+
 When several labels need `level.dat` data during one refresh, use `WorldDataReader.readMetadata(...)` and pass the resulting snapshot through the UI update path instead of calling many independent getters. The individual getters remain available for narrow compatibility calls, but page refreshes should avoid reparsing the same file repeatedly.
 
 `level.dat` numeric fields should be read as generic NBT `NumberTag` values unless the exact tag width is meaningful. Older or migrated worlds may store the same logical field as byte, short, int, or long; exact getters like `getIntTag(...)` can throw when the stored numeric width differs.

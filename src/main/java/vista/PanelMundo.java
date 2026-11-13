@@ -187,7 +187,7 @@ public class PanelMundo extends JPanel {
         importarButton.setText("Importar mundo");
         exportarButton.setText("Exportar mundo");
         generarButton.setText("Generar nuevo");
-        generarPreviewButton.setText("Generar preview");
+        generarPreviewButton.setText("Generar vista previa");
         guardarConfiguracionMundoButton.setText("Guardar ajustes del mundo");
         previewMenuButton.setText(null);
         AppTheme.applyRefreshIconButtonStyle(refrescarButton);
@@ -201,6 +201,8 @@ public class PanelMundo extends JPanel {
         applyDefaultPrimaryButtonStyle();
         spawnProtectionSpinner.setModel(new SpinnerNumberModel(16, 0, Integer.MAX_VALUE, 1));
         maxWorldSizeSpinner.setModel(new SpinnerNumberModel(29999984, 1, Integer.MAX_VALUE, 1));
+        spawnProtectionSpinner.setEditor(new JSpinner.NumberEditor(spawnProtectionSpinner, "#"));
+        maxWorldSizeSpinner.setEditor(new JSpinner.NumberEditor(maxWorldSizeSpinner, "#"));
         regionCompressionCombo.setModel(new DefaultComboBoxModel<>(REGION_FILE_COMPRESSION_OPTIONS));
         perfilRenderCombo.setModel(new DefaultComboBoxModel<>(PreviewRenderPreferences.PreviewRenderPreset.values()));
         limiteRenderCombo.setModel(new DefaultComboBoxModel<>(new PreviewRenderLimitOption[]{
@@ -356,7 +358,7 @@ public class PanelMundo extends JPanel {
     }
 
     private JPanel crearSeedRow() {
-        return crearInfoRow("Seed:", seedValueLabel);
+        return crearInfoRow("Semilla:", seedValueLabel);
     }
 
     private JPanel crearInfoRow(String titulo, JLabel valorLabel) {
@@ -419,7 +421,7 @@ public class PanelMundo extends JPanel {
         ajustes.setLayout(new BoxLayout(ajustes, BoxLayout.Y_AXIS));
         ajustes.add(crearTarjetaAjusteBooleano("Permitir Nether", allowNetherCheckBox));
         ajustes.add(Box.createVerticalStrut(4));
-        ajustes.add(crearTarjetaAjusteCampo("Region file compression", regionCompressionCombo));
+        ajustes.add(crearTarjetaAjusteCampo("Compresión de regiones", regionCompressionCombo));
         ajustes.add(Box.createVerticalStrut(4));
         ajustes.add(crearTarjetaAjusteCampo("Protección del spawn", spawnProtectionSpinner));
         ajustes.add(Box.createVerticalStrut(4));
@@ -598,6 +600,7 @@ public class PanelMundo extends JPanel {
             allowCommandsValueLabel.setText("-");
             gameRulesValueLabel.setText("-");
             dataPacksValueLabel.setText("-");
+            almacenamientoSequence.incrementAndGet();
             pesoMundoValueLabel.setText("-");
             pesoStatsSavesValueLabel.setText("-");
             pesoTotalValueLabel.setText("-");
@@ -694,6 +697,7 @@ public class PanelMundo extends JPanel {
         updatingWorldSettingsControls = false;
         markCurrentWorldSettingsAsPersisted();
         updateWorldSettingsSaveButtonState();
+        almacenamientoSequence.incrementAndGet();
         pesoMundoValueLabel.setText("-");
         pesoStatsSavesValueLabel.setText("-");
         pesoTotalValueLabel.setText("-");
@@ -812,7 +816,7 @@ public class PanelMundo extends JPanel {
         metadataReadPanel.add(Box.createVerticalStrut(10));
 
         agregarSeccionMetadata("Estado del mundo");
-        metadataReadPanel.add(crearInfoRow("Gamemode:", gamemodeValueLabel));
+        metadataReadPanel.add(crearInfoRow("Modo de juego:", gamemodeValueLabel));
         metadataReadPanel.add(Box.createVerticalStrut(4));
         metadataReadPanel.add(crearInfoRow("Dificultad:", difficultyValueLabel));
         metadataReadPanel.add(Box.createVerticalStrut(4));
@@ -824,7 +828,7 @@ public class PanelMundo extends JPanel {
         metadataReadPanel.add(Box.createVerticalStrut(10));
 
         agregarSeccionMetadata("Generación y packs");
-        metadataReadPanel.add(crearInfoRow("Generator settings:", generatorSettingsValueLabel));
+        metadataReadPanel.add(crearInfoRow("Ajustes del generador:", generatorSettingsValueLabel));
         metadataReadPanel.add(Box.createVerticalStrut(4));
         metadataReadPanel.add(crearInfoRow("Generar estructuras:", estructurasValueLabel));
         metadataReadPanel.add(Box.createVerticalStrut(4));
@@ -1163,7 +1167,18 @@ public class PanelMundo extends JPanel {
         }
     }
 
+    // Recorrer la carpeta del mundo puede tardar segundos en mundos grandes o discos lentos,
+    // así que se hace fuera del EDT. El contador descarta resultados de un mundo anterior.
+    private static final java.util.concurrent.ExecutorService ALMACENAMIENTO_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "dora-world-size");
+                t.setDaemon(true);
+                return t;
+            });
+    private final AtomicLong almacenamientoSequence = new AtomicLong();
+
     private void actualizarDatosAlmacenamiento() {
+        long secuencia = almacenamientoSequence.incrementAndGet();
         World mundo = getMundoSeleccionadoOActivo();
         if (mundo == null || mundo.getWorldDir() == null || mundo.getWorldDir().isBlank()) {
             pesoMundoValueLabel.setText("-");
@@ -1172,10 +1187,32 @@ public class PanelMundo extends JPanel {
             return;
         }
 
-        WorldStorageStats storageStats = WorldStorageAnalyzer.analyze(mundo);
-        pesoMundoValueLabel.setText(formatearTamano(storageStats.worldBytes()));
-        pesoStatsSavesValueLabel.setText(formatearTamano(storageStats.playerAndStatsBytes()));
-        pesoTotalValueLabel.setText(formatearTamano(storageStats.totalBytes()));
+        pesoMundoValueLabel.setText("Calculando...");
+        pesoStatsSavesValueLabel.setText("Calculando...");
+        pesoTotalValueLabel.setText("Calculando...");
+        ALMACENAMIENTO_EXECUTOR.execute(() -> {
+            WorldStorageStats storageStats;
+            try {
+                storageStats = WorldStorageAnalyzer.analyze(mundo);
+            } catch (RuntimeException ex) {
+                storageStats = null;
+            }
+            WorldStorageStats resultado = storageStats;
+            SwingUtilities.invokeLater(() -> {
+                if (secuencia != almacenamientoSequence.get()) {
+                    return;
+                }
+                if (resultado == null) {
+                    pesoMundoValueLabel.setText("-");
+                    pesoStatsSavesValueLabel.setText("-");
+                    pesoTotalValueLabel.setText("-");
+                    return;
+                }
+                pesoMundoValueLabel.setText(formatearTamano(resultado.worldBytes()));
+                pesoStatsSavesValueLabel.setText(formatearTamano(resultado.playerAndStatsBytes()));
+                pesoTotalValueLabel.setText(formatearTamano(resultado.totalBytes()));
+            });
+        });
     }
 
     private List<PreviewPlayerData> obtenerJugadoresRecientesDesdePlayerdata(Server server, World mundo) {
@@ -1257,15 +1294,15 @@ public class PanelMundo extends JPanel {
         panel.add(semillaField);
         panel.add(new JLabel("Tipo de mundo"));
         panel.add(tipoBox);
-        panel.add(new JLabel("Generator settings"));
+        panel.add(new JLabel("Ajustes del generador"));
         panel.add(generatorSettingsField);
         panel.add(new JLabel("Initial enabled packs"));
         panel.add(initialEnabledPacksField);
         panel.add(new JLabel("Initial disabled packs"));
         panel.add(initialDisabledPacksField);
-        panel.add(new JLabel("Region file compression"));
+        panel.add(new JLabel("Compresión de regiones"));
         panel.add(regionFileCompressionBox);
-        panel.add(new JLabel("Gamemode por defecto"));
+        panel.add(new JLabel("Modo de juego por defecto"));
         panel.add(gamemodeBox);
         panel.add(new JLabel("Dificultad"));
         panel.add(dificultadBox);
@@ -1383,7 +1420,7 @@ public class PanelMundo extends JPanel {
     private void generarPreviewMundoSeleccionado() {
         World mundo = getMundoSeleccionadoOActivo();
         if (mundo == null) {
-            JOptionPane.showMessageDialog(this, "No hay un mundo seleccionado.", "Generar preview", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "No hay un mundo seleccionado.", "Generar vista previa", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -1395,7 +1432,7 @@ public class PanelMundo extends JPanel {
             JOptionPane.showMessageDialog(
                     this,
                     construirMensajeRenderEnCurso(),
-                    "Generar preview",
+                    "Generar vista previa",
                     JOptionPane.INFORMATION_MESSAGE
             );
             return;
@@ -1585,7 +1622,7 @@ public class PanelMundo extends JPanel {
                         restaurarPreviewAnteriorSiExiste(habiaPreviewAnterior);
                         JOptionPane.showMessageDialog(PanelMundo.this,
                                 "El mundo no contiene archivos .mca en la carpeta region.",
-                                "Generar preview",
+                                "Generar vista previa",
                                 JOptionPane.WARNING_MESSAGE);
                         return;
                     }
@@ -1617,8 +1654,8 @@ public class PanelMundo extends JPanel {
                     }
                     restaurarPreviewAnteriorSiExiste(habiaPreviewAnterior);
                     JOptionPane.showMessageDialog(PanelMundo.this,
-                            "No se ha podido generar la preview: " + message,
-                            "Generar preview",
+                            "No se ha podido generar la vista previa: " + message,
+                            "Generar vista previa",
                             JOptionPane.ERROR_MESSAGE);
                 }
             }
@@ -2418,7 +2455,7 @@ public class PanelMundo extends JPanel {
     private void actualizarPreviewSeleccionada() {
         World mundo = getMundoSeleccionadoOActivo();
         if (mundo == null) {
-            mostrarTextoPreview("La preview todavía no existe.");
+            mostrarTextoPreview("La vista previa todavía no existe.");
             return;
         }
 
@@ -2433,14 +2470,14 @@ public class PanelMundo extends JPanel {
 
         Path previewPath = WorldFilesService.getPreviewPath(mundo);
         if (!Files.isRegularFile(previewPath)) {
-            mostrarTextoPreview("La preview todavía no existe.");
+            mostrarTextoPreview("La vista previa todavía no existe.");
             return;
         }
 
         try {
             BufferedImage image = ImageIO.read(previewPath.toFile());
             if (image == null) {
-                mostrarTextoPreview("No se ha podido leer la preview.");
+                mostrarTextoPreview("No se ha podido leer la vista previa.");
                 return;
             }
             PreviewOverlayData overlayData = WorldPreviewOverlayService.loadOverlayData(mundo);
@@ -2453,13 +2490,13 @@ public class PanelMundo extends JPanel {
                 System.out.println("[PanelMundo] Overlay metadata missing for preview. Regenerate the preview once to enable local overlays.");
                 JOptionPane.showMessageDialog(
                         this,
-                        "Esta preview no tiene metadata de superposición.\nRegenera la preview una vez para poder mostrar el spawn o los límites de chunks.",
+                        "Esta vista previa no tiene datos de superposición.\nRegenera la vista previa una vez para poder mostrar el spawn o los límites de chunks.",
                         "Superposiciones no disponibles",
                         JOptionPane.INFORMATION_MESSAGE
                 );
             }
         } catch (IOException ex) {
-            mostrarTextoPreview("No se ha podido leer la preview.");
+            mostrarTextoPreview("No se ha podido leer la vista previa.");
         }
     }
 
@@ -2476,7 +2513,7 @@ public class PanelMundo extends JPanel {
             actualizarPreviewSeleccionada();
             return;
         }
-        mostrarTextoPreview("La preview todavía no existe.");
+        mostrarTextoPreview("La vista previa todavía no existe.");
     }
 
     private void sincronizarEstadoRenderCompartido() {
@@ -2558,18 +2595,18 @@ public class PanelMundo extends JPanel {
 
         Path previewPath = WorldFilesService.getPreviewPath(mundo);
         if (!Files.isRegularFile(previewPath)) {
-            JOptionPane.showMessageDialog(this, "La preview todavía no existe.", "Copiar", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "La vista previa todavía no existe.", "Copiar", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
         try {
             BufferedImage image = ImageIO.read(previewPath.toFile());
             if (image == null) {
-                throw new FileNotFoundException("No se ha podido leer la preview.");
+                throw new FileNotFoundException("No se ha podido leer la vista previa.");
             }
             Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new ImageSelection(image), null);
         } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "No se ha podido copiar la preview: " + ex.getMessage(), "Copiar", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "No se ha podido copiar la vista previa: " + ex.getMessage(), "Copiar", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -2582,7 +2619,7 @@ public class PanelMundo extends JPanel {
 
         Path previewPath = WorldFilesService.getPreviewPath(mundo);
         if (!Files.isRegularFile(previewPath)) {
-            JOptionPane.showMessageDialog(this, "La preview todavía no existe.", "Ver archivo", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "La vista previa todavía no existe.", "Ver archivo", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -2608,12 +2645,12 @@ public class PanelMundo extends JPanel {
 
         Path previewPath = WorldFilesService.getPreviewPath(mundo);
         if (!Files.isRegularFile(previewPath)) {
-            JOptionPane.showMessageDialog(this, "La preview todavía no existe.", "Guardar como", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "La vista previa todavía no existe.", "Guardar como", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Guardar preview como");
+        chooser.setDialogTitle("Guardar vista previa como");
         java.io.File imagenesDir = Utilidades.resolveSystemPicturesDirectory();
         if (imagenesDir != null && imagenesDir.isDirectory()) {
             chooser.setCurrentDirectory(imagenesDir);
@@ -2650,7 +2687,7 @@ public class PanelMundo extends JPanel {
             }
             Files.copy(previewPath, destino, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "No se ha podido guardar la preview: " + ex.getMessage(), "Guardar como", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "No se ha podido guardar la vista previa: " + ex.getMessage(), "Guardar como", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -2675,7 +2712,7 @@ public class PanelMundo extends JPanel {
 
         JOptionPane.showMessageDialog(
                 this,
-                "Esta preview no tiene metadata de superposición.\nRegenera la preview una vez para poder mostrar el spawn o los límites de chunks.",
+                "Esta vista previa no tiene datos de superposición.\nRegenera la vista previa una vez para poder mostrar el spawn o los límites de chunks.",
                 "Superposiciones no disponibles",
                 JOptionPane.INFORMATION_MESSAGE
         );
@@ -2687,14 +2724,14 @@ public class PanelMundo extends JPanel {
             if (mismoContextoRenderEnCurso(gestorServidores.getServidorSeleccionado(), mundo)) {
                 generarPreviewButton.setText("Cancelar");
             } else {
-                generarPreviewButton.setText("Generar preview");
+                generarPreviewButton.setText("Generar vista previa");
             }
             ajustarAnchoBotonPreview();
             return;
         }
         World mundo = getMundoSeleccionadoOActivo();
         boolean existePreview = mundo != null && Files.isRegularFile(WorldFilesService.getPreviewPath(mundo));
-        generarPreviewButton.setText(existePreview ? "Regenerar preview" : "Generar preview");
+        generarPreviewButton.setText(existePreview ? "Regenerar vista previa" : "Generar vista previa");
         ajustarAnchoBotonPreview();
     }
 
@@ -2704,14 +2741,14 @@ public class PanelMundo extends JPanel {
             previewRenderStatusLabel.setText(progresoRenderPreviewActual == null || progresoRenderPreviewActual.isBlank()
                     ? "Renderizando..."
                     : progresoRenderPreviewActual);
-            previewRenderStatusLabel.setToolTipText("Generando preview de " + construirEtiquetaRenderEnCurso());
+            previewRenderStatusLabel.setToolTipText("Generando vista previa de " + construirEtiquetaRenderEnCurso());
             return;
         }
         if (ultimoTiempoRenderPreview != null && !ultimoTiempoRenderPreview.isBlank()) {
             previewRenderStatusLabel.setVisible(true);
             previewRenderStatusLabel.setText("Último render: " + ultimoTiempoRenderPreview);
             previewRenderStatusLabel.setToolTipText(ultimoDetalleTiempoRenderPreview == null || ultimoDetalleTiempoRenderPreview.isBlank()
-                    ? "Tiempo de la última generación de preview."
+                    ? "Tiempo de la última generación de la vista previa."
                     : ultimoDetalleTiempoRenderPreview);
             return;
         }
@@ -2731,8 +2768,8 @@ public class PanelMundo extends JPanel {
     private void ajustarAnchoBotonPreview() {
         FontMetrics metrics = generarPreviewButton.getFontMetrics(generarPreviewButton.getFont());
         int maxTextWidth = Math.max(
-                metrics.stringWidth("Generar preview"),
-                Math.max(metrics.stringWidth("Regenerar preview"), metrics.stringWidth("Cancelar"))
+                metrics.stringWidth("Generar vista previa"),
+                Math.max(metrics.stringWidth("Regenerar vista previa"), metrics.stringWidth("Cancelar"))
         );
         int width = maxTextWidth + 28;
         int height = Math.max(30, generarPreviewButton.getPreferredSize().height);
@@ -2771,7 +2808,7 @@ public class PanelMundo extends JPanel {
 
     private String construirDetalleTiempoRender(MCARenderer.RenderStats stats, double elapsedSeconds) {
         if (stats == null) {
-            return "Tiempo total de la última generación de preview: " + formatearDuracionRender(elapsedSeconds);
+            return "Tiempo total de la última generación de la vista previa: " + formatearDuracionRender(elapsedSeconds);
         }
         return "<html>"
                 + "Total: " + formatearDuracionRender(elapsedSeconds) + "<br>"
@@ -2823,7 +2860,7 @@ public class PanelMundo extends JPanel {
         button.setText(null);
         button.setIcon(SvgIconFactory.create("doraicons/tuning-2.svg", 18, 18));
         button.setMargin(new Insets(4, 8, 4, 8));
-        button.setToolTipText("Opciones de preview");
+        button.setToolTipText("Opciones de vista previa");
         stylePreviewOverlayButton(button);
     }
 
@@ -2902,7 +2939,7 @@ public class PanelMundo extends JPanel {
         });
 
         stylePreviewOptionCheckBox(mostrarSpawnMenuItem);
-        mostrarSpawnMenuItem.setToolTipText("<html><b>Qué hace:</b> superpone la marca del spawn usando metadata de overlay de la preview.<br><b>Rendimiento:</b> impacto mínimo; solo dibujo de overlay en la UI.<br><b>Visual:</b> facilita orientarse en el mapa.<br><b>Efectos secundarios:</b> si la preview no tiene metadata de overlay hay que regenerarla una vez.</html>");
+        mostrarSpawnMenuItem.setToolTipText("<html><b>Qué hace:</b> superpone la marca del spawn usando metadata de overlay de la vista previa.<br><b>Rendimiento:</b> impacto mínimo; solo dibujo de overlay en la UI.<br><b>Visual:</b> facilita orientarse en el mapa.<br><b>Efectos secundarios:</b> si la vista previa no tiene metadata de overlay hay que regenerarla una vez.</html>");
         mostrarSpawnMenuItem.addActionListener(e -> {
             previewPreferences = previewPreferences.withShowSpawn(mostrarSpawnMenuItem.isSelected());
             aplicarPreferenciasPreviewAOverlay();
@@ -2911,7 +2948,7 @@ public class PanelMundo extends JPanel {
         });
 
         stylePreviewOptionCheckBox(mostrarJugadoresMenuItem);
-        mostrarJugadoresMenuItem.setToolTipText("<html><b>Qué hace:</b> muestra sobre la preview las últimas posiciones de jugadores conocidas.<br><b>Rendimiento:</b> impacto mínimo; solo overlay 2D en la interfaz.<br><b>Visual:</b> ayuda a localizar actividad reciente.<br><b>Efectos secundarios:</b> depende de playerdata y metadata de overlay disponibles.</html>");
+        mostrarJugadoresMenuItem.setToolTipText("<html><b>Qué hace:</b> muestra sobre la vista previa las últimas posiciones de jugadores conocidas.<br><b>Rendimiento:</b> impacto mínimo; solo overlay 2D en la interfaz.<br><b>Visual:</b> ayuda a localizar actividad reciente.<br><b>Efectos secundarios:</b> depende de playerdata y metadata de overlay disponibles.</html>");
         mostrarJugadoresMenuItem.addActionListener(e -> {
             previewPreferences = previewPreferences.withShowPlayers(mostrarJugadoresMenuItem.isSelected());
             aplicarPreferenciasPreviewAOverlay();
@@ -2920,7 +2957,7 @@ public class PanelMundo extends JPanel {
         });
 
         stylePreviewOptionCheckBox(limitesChunksMenuItem);
-        limitesChunksMenuItem.setToolTipText("<html><b>Qué hace:</b> dibuja la retícula de chunks sobre la preview cargada.<br><b>Rendimiento:</b> impacto mínimo; solo overlay local en la UI.<br><b>Visual:</b> facilita depurar alineación, estructuras y medidas.<br><b>Efectos secundarios:</b> puede ensuciar mapas muy densos.</html>");
+        limitesChunksMenuItem.setToolTipText("<html><b>Qué hace:</b> dibuja la retícula de chunks sobre la vista previa cargada.<br><b>Rendimiento:</b> impacto mínimo; solo overlay local en la UI.<br><b>Visual:</b> facilita depurar alineación, estructuras y medidas.<br><b>Efectos secundarios:</b> puede ensuciar mapas muy densos.</html>");
         limitesChunksMenuItem.addActionListener(e -> {
             previewPreferences = previewPreferences.withShowChunkGrid(limitesChunksMenuItem.isSelected());
             aplicarPreferenciasPreviewAOverlay();
@@ -2938,10 +2975,10 @@ public class PanelMundo extends JPanel {
 
         JPanel generationSection = createPreviewOptionsSectionPanel("Generación");
         generationSection.add(createPreviewStackedOptionRow("Área máxima", limiteRenderCombo,
-                "<html><b>Qué hace:</b> define el tamaño máximo de la ventana de bloques que se intentará renderizar alrededor del centro.<br><b>Rendimiento:</b> cuanto mayor sea, más regiones/chunks se leerán y más tiempo consumirá.<br><b>Visual:</b> más contexto a cambio de previews más pesadas.<br><b>Efectos secundarios:</b> valores altos pueden disparar memoria y tiempo.</html>"));
+                "<html><b>Qué hace:</b> define el tamaño máximo de la ventana de bloques que se intentará renderizar alrededor del centro.<br><b>Rendimiento:</b> cuanto mayor sea, más regiones/chunks se leerán y más tiempo consumirá.<br><b>Visual:</b> más contexto a cambio de vistas previas más pesadas.<br><b>Efectos secundarios:</b> valores altos pueden disparar memoria y tiempo.</html>"));
         generationSection.add(Box.createVerticalStrut(4));
         generationSection.add(createPreviewStackedOptionRow("Centro de generación", centroRenderCombo,
-                "<html><b>Qué hace:</b> elige el punto alrededor del que se recorta la preview cuando no se genera el mundo completo.<br><b>Rendimiento:</b> no cambia el coste por píxel, pero sí qué zona se procesa.<br><b>Visual:</b> cambia totalmente el encuadre final.<br><b>Efectos secundarios:</b> si el jugador ya no existe o no tiene datos recientes se vuelve al spawn.</html>"));
+                "<html><b>Qué hace:</b> elige el punto alrededor del que se recorta la vista previa cuando no se genera el mundo completo.<br><b>Rendimiento:</b> no cambia el coste por píxel, pero sí qué zona se procesa.<br><b>Visual:</b> cambia totalmente el encuadre final.<br><b>Efectos secundarios:</b> si el jugador ya no existe o no tiene datos recientes se vuelve al spawn.</html>"));
         generationSection.add(Box.createVerticalStrut(4));
         generationSection.add(createPreviewCheckBoxRow(usarTodoMenuItem, usarTodoMenuItem.getToolTipText()));
         generationSection.add(Box.createVerticalStrut(4));
@@ -3482,7 +3519,7 @@ public class PanelMundo extends JPanel {
         private boolean chunkGridVisible = false;
         private boolean spawnVisible = false;
         private boolean playersVisible = false;
-        private String message = "La preview todavía no existe.";
+        private String message = "La vista previa todavía no existe.";
         private double zoom = 1.0d;
         private double panX = 0d;
         private double panY = 0d;

@@ -67,3 +67,9 @@ Use existing app UI helpers:
 The local wizard should match shared process wizard navigation behavior: use the right-arrow icon for intermediate steps and switch the final right-side action to `doraicons/rocket.svg` when the active step creates the server.
 
 Keep Spanish user-facing text consistent with the rest of the wizard.
+
+## Importing
+
+- The Importar button in the server list opens a menu with "Carpeta de servidor..." (`GestorServidores.importarServidor`) and "Modpack (.mrpack o .zip)..." (`VentanaPrincipal.importarModpackDesdeLista`).
+- Imported folders are named after the folder (`construirNombreDesdeCarpeta`); generic names like `server` or `minecraft` fall back to "Servidor <versión>". Servers created by the wizard keep "Servidor <versión>".
+- A modpack goes into the selected server when it is a compatible mod server. Otherwise Dora shows the Minecraft and loader versions from `modrinth.index.json`, can open the wizard, and then imports into the new server through `PanelExtensiones.importarModpackDesdeArchivo`.

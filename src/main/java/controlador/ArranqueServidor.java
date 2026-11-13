@@ -193,6 +193,7 @@ final class ArranqueServidor {
             Process proceso = pb.start();
             server.setServerProcess(proceso);
             server.setIniciando(true);
+            server.setDeteniendo(false);
             gestor.notificarEstadoServidor(server);
 
             // comienzo a leer la consola
@@ -206,6 +207,7 @@ final class ArranqueServidor {
                        server.setServerProcess(null);
                    }
                    server.setIniciando(false);
+                   server.setDeteniendo(false);
                    server.setLogReaderIniciado(false);
                    server.appendConsoleLinea("[INFO] El servidor se ha detenido.");
                    gestor.notificarEstadoServidor(server);
@@ -226,7 +228,8 @@ final class ArranqueServidor {
 
         } catch (IOException e) {
             server.setIniciando(false);
-            server.appendConsoleLinea("[ERROR] El servidor no se pudo iniciar"+e.getMessage());
+            SwingUtilities.invokeLater(() -> gestor.notificarEstadoServidor(server));
+            server.appendConsoleLinea("[ERROR] El servidor no se pudo iniciar: "+e.getMessage());
             AppErrorReporter.report("El proceso del servidor no se pudo iniciar.", e);
         }
         return null;

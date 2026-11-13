@@ -14,7 +14,7 @@ public final class GestorConfiguracion {
             "com.formdev.flatlaf.intellijthemes.FlatArcIJTheme";
     private static final int DEFAULT_STATS_RANGE_SECONDS = 60;
     private static final boolean DEFAULT_STATS_PERSISTENCE_ENABLED = true;
-    private static final int DEFAULT_STATS_RECENT_WINDOW_SECONDS = 24 * 60 * 60;
+    private static final int DEFAULT_STATS_RECENT_WINDOW_SECONDS = modelo.Server.VENTANA_RECIENTE_POR_DEFECTO_SEGUNDOS;
     private static final int DEFAULT_STATS_HISTORICAL_RESOLUTION_SECONDS = 60;
     private static final boolean DEFAULT_PLAYER_LIST_COMPACT = false;
     private static final boolean DEFAULT_EXTENSION_LIST_COMPACT = false;
@@ -63,7 +63,8 @@ public final class GestorConfiguracion {
         if (config.getEstadisticasPersistenciaActiva() == null) {
             config.setEstadisticasPersistenciaActiva(DEFAULT_STATS_PERSISTENCE_ENABLED);
         }
-        if (config.getEstadisticasVentanaRecienteSegundos() == null || config.getEstadisticasVentanaRecienteSegundos() <= 0) {
+        if (config.getEstadisticasVentanaRecienteSegundos() == null || config.getEstadisticasVentanaRecienteSegundos() <= 0
+                || config.getEstadisticasVentanaRecienteSegundos() > modelo.Server.VENTANA_RECIENTE_MAXIMA_SEGUNDOS) {
             config.setEstadisticasVentanaRecienteSegundos(DEFAULT_STATS_RECENT_WINDOW_SECONDS);
         }
         if (config.getEstadisticasResolucionHistoricaSegundos() == null || config.getEstadisticasResolucionHistoricaSegundos() <= 0) {
@@ -122,7 +123,9 @@ public final class GestorConfiguracion {
 
     public static int getEstadisticasVentanaRecienteSegundos() {
         Integer seconds = cargarConfiguracion().getEstadisticasVentanaRecienteSegundos();
-        return seconds == null || seconds <= 0 ? DEFAULT_STATS_RECENT_WINDOW_SECONDS : seconds;
+        return seconds == null || seconds <= 0 || seconds > modelo.Server.VENTANA_RECIENTE_MAXIMA_SEGUNDOS
+                ? DEFAULT_STATS_RECENT_WINDOW_SECONDS
+                : seconds;
     }
 
     public static int getEstadisticasResolucionHistoricaSegundos() {

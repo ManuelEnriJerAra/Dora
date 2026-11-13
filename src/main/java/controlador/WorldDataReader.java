@@ -352,7 +352,7 @@ public class WorldDataReader {
                 hours = (hours + 1L) % 24L;
                 minutes = 0L;
             }
-            return String.format(Locale.ROOT, "Dia %d - %02d:%02d", day + 1L, hours, minutes);
+            return String.format(Locale.ROOT, "Día %d - %02d:%02d", day + 1L, hours, minutes);
         } catch (Exception ex) {
             return null;
         }
@@ -577,7 +577,7 @@ public class WorldDataReader {
             hours = (hours + 1L) % 24L;
             minutes = 0L;
         }
-        return String.format(Locale.ROOT, "Dia %d - %02d:%02d", day + 1L, hours, minutes);
+        return String.format(Locale.ROOT, "Día %d - %02d:%02d", day + 1L, hours, minutes);
     }
 
     private static String readDataPacksSummary(CompoundTag data) {
