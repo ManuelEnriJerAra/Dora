@@ -41,9 +41,6 @@ import lombok.Getter;
 import lombok.Setter;
 import modelo.extensions.ServerExtension;
 import modelo.extensions.ServerPlatform;
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.ObjectMapper;
 
 import javax.swing.*;
 import java.awt.*;
@@ -84,14 +81,8 @@ public class GestorServidores {
     // ===== ATRIBUTOS =====
     private static final MojangAPI MOJANG_API = new MojangAPI();
 
-    private static final String JSON_FILE = "dora-server-list.json";
-
-    private static File getJsonFile() {
-        return AppPaths.configDirectory().resolve(JSON_FILE).toFile();
-    }
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final File jsonFile;
+    @Getter(AccessLevel.NONE)
+    private final ArchivoListaServidores archivoServidores;
     private final ServerExtensionsService serverExtensionsService = new ServerExtensionsService();
     private final ExtensionCatalogService extensionCatalogService = new ExtensionCatalogService();
     private final CurseForgeModpackService curseForgeModpackService = new CurseForgeModpackService();
@@ -99,9 +90,9 @@ public class GestorServidores {
     private final FileDownloader extensionDownloader = new ExtensionArtifactDownloader();
     @Getter(AccessLevel.NONE)
     private final ImportadorModpacks importadorModpacks;
-    private ServerAutomationService automationService;
     @Getter(AccessLevel.NONE)
     private final ConversorPlataformaServidor conversor = new ConversorPlataformaServidor(this);
+    private ServerAutomationService automationService;
 
     private String avisoServidoresNoCargados;
     private String avisoListaServidoresIlegible;
@@ -120,7 +111,7 @@ public class GestorServidores {
 
     // Constructor por defecto
     public GestorServidores() {
-        this(getJsonFile(), new ModrinthModpackService());
+        this(null, new ModrinthModpackService());
     }
 
     GestorServidores(File jsonFile) {
@@ -128,7 +119,7 @@ public class GestorServidores {
     }
 
     GestorServidores(File jsonFile, ModrinthModpackService modrinthModpackService) {
-        this.jsonFile = jsonFile == null ? getJsonFile() : jsonFile;
+        this.archivoServidores = new ArchivoListaServidores(jsonFile);
         this.modrinthModpackService = modrinthModpackService == null ? new ModrinthModpackService() : modrinthModpackService;
         this.importadorModpacks = new ImportadorModpacks(
                 this,
@@ -137,7 +128,8 @@ public class GestorServidores {
                 this.modrinthModpackService,
                 extensionDownloader
         );
-        this.listaServidores = cargarServidores();
+        this.listaServidores = archivoServidores.cargar();
+        this.avisoListaServidoresIlegible = archivoServidores.getAvisoArchivoIlegible();
         boolean cambiosOrden = normalizarMetadatosOrden(true);
         validarYLimpiarServidoresPersistidos();
         boolean cambiosMundos = sincronizarMundosServidoresCargados();
@@ -160,63 +152,6 @@ public class GestorServidores {
             }
         }
         return cambios;
-    }
-
-    // cargamos todos los servidores del JSON
-    private List<Server> cargarServidores(){
-        File file = jsonFile;
-        if (!file.exists()) {
-            List<Server> servidores = new ArrayList<>();
-            try{
-                File parent = file.getParentFile();
-                if (parent != null) {
-                    Files.createDirectories(parent.toPath());
-                }
-                Utilidades.escribirArchivoAtomico(
-                        file.toPath(),
-                        mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(servidores)
-                );
-            } catch (Exception e) {
-                System.err.println("Error al inicializar servidores: " + e.getMessage());
-            }
-            return servidores;
-        }
-        try{
-            List<Server> servidores = mapper.readValue(file, new TypeReference<>(){});
-            return servidores == null ? new ArrayList<>() : new ArrayList<>(servidores);
-        } catch (JacksonException e) {
-            System.err.println("Error al cargar servidores: " + e.getMessage());
-            // El siguiente guardado sobrescribiría el archivo ilegible, así que antes dejamos una copia recuperable.
-            Path copia = respaldarArchivoIlegible(file.toPath());
-            avisoListaServidoresIlegible = "No se ha podido leer " + JSON_FILE + " porque su contenido no es válido."
-                    + "\nDora empezará con la lista de servidores vacía."
-                    + (copia == null
-                    ? "\nNo se ha podido crear una copia de seguridad del archivo."
-                    : "\nSe ha guardado una copia del archivo original en:\n" + copia);
-            AppErrorReporter.report("No se ha podido leer " + JSON_FILE + ".", e);
-            return new ArrayList<>();
-        }
-    }
-
-    // Copia un archivo de datos ilegible a un nombre único para que no se pierda al volver a guardar.
-    static Path respaldarArchivoIlegible(Path archivo) {
-        if (archivo == null || !Files.isRegularFile(archivo)) {
-            return null;
-        }
-        try {
-            String marca = java.time.LocalDateTime.now()
-                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-            Path copia = archivo.resolveSibling(archivo.getFileName() + ".corrupt-" + marca);
-            int intento = 1;
-            while (Files.exists(copia)) {
-                copia = archivo.resolveSibling(archivo.getFileName() + ".corrupt-" + marca + "-" + intento++);
-            }
-            Files.copy(archivo, copia);
-            return copia;
-        } catch (IOException | RuntimeException ex) {
-            System.err.println("No se ha podido respaldar " + archivo + ": " + ex.getMessage());
-            return null;
-        }
     }
 
     private boolean normalizarMetadatosOrden(boolean reordenarListaInterna) {
@@ -673,7 +608,7 @@ public class GestorServidores {
         sb.append("No se han podido cargar ")
                 .append(nuevosNoCargables.size())
                 .append(" servidores guardados (carpeta inexistente o servidor inválido).")
-                .append("\nNo se mostrarán, pero se conservan en " + JSON_FILE
+                .append("\nNo se mostrarán, pero se conservan en " + ArchivoListaServidores.NOMBRE_ARCHIVO
                         + " y volverán a aparecer cuando su carpeta esté disponible.");
 
         // mostramos un máximo de 8 servidores que no se han podido cargar
@@ -1102,22 +1037,10 @@ public class GestorServidores {
     // Guarda la lista de servidores en el JSON
     public void guardarServidores(){
         normalizarMetadatosOrden(true);
-        try{
-            File parent = jsonFile.getParentFile();
-            if (parent != null) {
-                Files.createDirectories(parent.toPath());
-            }
-            // Los no disponibles se guardan también: solo están ocultos, no eliminados.
-            List<Server> persistidos = copiarListaServidoresOrdenada();
-            persistidos.addAll(servidoresNoDisponibles);
-            Utilidades.escribirArchivoAtomico(
-                    jsonFile.toPath(),
-                    mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(persistidos)
-            );
-        } catch (Exception e) {
-            System.err.println("Error al guardar servidores: " + e.getMessage());
-            AppErrorReporter.report("No se ha podido guardar " + JSON_FILE + ".", e);
-        }
+        // Los no disponibles se guardan también: solo están ocultos, no eliminados.
+        List<Server> persistidos = copiarListaServidoresOrdenada();
+        persistidos.addAll(servidoresNoDisponibles);
+        archivoServidores.guardar(persistidos);
     }
 
     public List<Server> getListaServidores() {
