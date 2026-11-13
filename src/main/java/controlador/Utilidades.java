@@ -342,6 +342,27 @@ public class Utilidades {
         escribirArchivoAtomico(propertiesPath, buffer.toString().getBytes(StandardCharsets.UTF_8));
     }
 
+    // Copia un archivo de datos ilegible a un nombre único para que no se pierda al volver a guardar.
+    static Path respaldarArchivoIlegible(Path archivo) {
+        if (archivo == null || !Files.isRegularFile(archivo)) {
+            return null;
+        }
+        try {
+            String marca = java.time.LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+            Path copia = archivo.resolveSibling(archivo.getFileName() + ".corrupt-" + marca);
+            int intento = 1;
+            while (Files.exists(copia)) {
+                copia = archivo.resolveSibling(archivo.getFileName() + ".corrupt-" + marca + "-" + intento++);
+            }
+            Files.copy(archivo, copia);
+            return copia;
+        } catch (IOException | RuntimeException ex) {
+            System.err.println("No se ha podido respaldar " + archivo + ": " + ex.getMessage());
+            return null;
+        }
+    }
+
     /**
      * Escribe el contenido en un temporal junto al destino y lo mueve encima. Así un cierre inesperado
      * a mitad de escritura nunca deja el archivo real truncado.

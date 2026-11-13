@@ -4,7 +4,10 @@ Use this guide before editing server import/listing/persistence, start/stop/rest
 
 ## Core Classes
 
-- `controlador.GestorServidores`: central server manager.
+- `controlador.GestorServidores`: central server manager (server list, selection, listeners, import, start/stop).
+- `controlador.ArchivoListaServidores`: reads and writes `dora-server-list.json`.
+- `controlador.MetadatosServidor`: default values filled into every saved server and the `server.properties` port sync.
+- `controlador.PuertosServidor` and `controlador.DialogoPuertoOcupado`: port checks and the "port busy" dialog used when starting.
 - `modelo.Server`: server model, runtime process, console listeners, extension list.
 - `modelo.ServerConfig`: persisted server config values.
 - `controlador.ServerRuntime`: runtime helper.
@@ -30,7 +33,7 @@ Before changing persistence, inspect `GestorConfiguracion`, `DoraConfig`, `Serve
 Persistence safety rules:
 
 - Write `dora-server-list.json` and `dora-config.json` through `Utilidades.escribirArchivoAtomico(...)` (temp file plus move), never directly onto the target file.
-- If a data file cannot be parsed, copy it to `<name>.corrupt-<timestamp>` with `GestorServidores.respaldarArchivoIlegible(...)` before continuing with defaults, and tell the user.
+- If a data file cannot be parsed, copy it to `<name>.corrupt-<timestamp>` with `Utilidades.respaldarArchivoIlegible(...)` before continuing with defaults, and tell the user.
 - Saved servers that are not loadable right now (missing folder, unplugged drive, invalid jar) are hidden, not deleted: they move to `servidoresNoDisponibles`, stay in the JSON on every save, and return to the visible list when validation passes again. Only `olvidarServidorNoDisponible(...)` or `eliminarServidor(...)` removes an entry.
 
 ## Start Pipeline

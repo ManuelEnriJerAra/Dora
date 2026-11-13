@@ -1,10 +1,12 @@
 ﻿# Server Creation Pipeline
 
-The server creation flow is centered in `src/main/java/controlador/GestorServidores.java`.
+The server creation wizard lives in `src/main/java/controlador/AsistenteCreacionServidor.java`. `GestorServidores.crearServidor()` opens it and then installs the chosen platform with `crearServidorAutomatizado(...)`.
+
+Existing-server conversion lives in `src/main/java/controlador/ConversorPlataformaServidor.java`; `GestorServidores` keeps the public `convertirServidorAPlataformaCompatible(...)` and `puedeConvertirseAPlataformaCompatible(...)` entry points and delegates to it.
 
 ## Main Flow
 
-1. `mostrarAsistenteCreacionServidor()` opens the modal wizard.
+1. `AsistenteCreacionServidor.mostrar()` opens the modal wizard.
 2. The wizard collects platform, version, parent directory, EULA acceptance, and folder name.
 3. `validarPasoCreacionServidor(...)` validates the active step.
 4. `ServerCreationWizardResult` carries the selected adapter, option, and final target directory.
@@ -48,7 +50,7 @@ When the user edits the folder name manually:
 
 ## Validation Rules
 
-Folder names are validated with `validarNombreCarpetaServidor(...)`.
+Folder names are validated with `AsistenteCreacionServidor.validarNombreCarpetaServidor(...)`.
 
 Also check for existing folders with `existeCarpetaConNombreNoPortable(...)` so Windows-style case-insensitive conflicts are caught.
 

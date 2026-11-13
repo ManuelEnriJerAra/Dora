@@ -52,32 +52,24 @@ class GestorServidoresTest {
 
     @Test
     void validarNombreCarpetaServidor_debeAceptarSoloNombresPortables() {
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server-1.20.1")).isNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("Forge_Server")).isNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server-1.20.1")).isNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("Forge_Server")).isNull();
 
-        assertThat(GestorServidores.validarNombreCarpetaServidor("")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor(" server")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server ")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor(".")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("..")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server.")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server/name")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server\\name")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("server:name")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("CON")).isNotNull();
-        assertThat(GestorServidores.validarNombreCarpetaServidor("com1.txt")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor(" server")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server ")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor(".")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("..")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server.")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server/name")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server\\name")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("server:name")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("CON")).isNotNull();
+        assertThat(AsistenteCreacionServidor.validarNombreCarpetaServidor("com1.txt")).isNotNull();
     }
 
     @Test
     void filtrosCreacionVersiones_debenMostrarReleasesYSnapshotsCuandoAmbosEstanActivos() throws Exception {
-        GestorServidores gestor = new GestorServidores(tempDir.resolve("dora-server-list.json").toFile());
-        Method debeMostrar = GestorServidores.class.getDeclaredMethod(
-                "debeMostrarOpcionCreacion",
-                ServerCreationOption.class,
-                boolean.class,
-                boolean.class
-        );
-        debeMostrar.setAccessible(true);
         ServerCreationOption release = new ServerCreationOption(
                 ServerPlatform.FABRIC,
                 "1.21.2",
@@ -95,10 +87,10 @@ class GestorServidoresTest {
                 ServerCreationOption.VERSION_TYPE_SNAPSHOT
         );
 
-        assertThat((Boolean) debeMostrar.invoke(gestor, release, true, true)).isTrue();
-        assertThat((Boolean) debeMostrar.invoke(gestor, snapshot, true, true)).isTrue();
-        assertThat((Boolean) debeMostrar.invoke(gestor, release, true, false)).isFalse();
-        assertThat((Boolean) debeMostrar.invoke(gestor, snapshot, false, true)).isFalse();
+        assertThat(AsistenteCreacionServidor.debeMostrarOpcionCreacion(release, true, true)).isTrue();
+        assertThat(AsistenteCreacionServidor.debeMostrarOpcionCreacion(snapshot, true, true)).isTrue();
+        assertThat(AsistenteCreacionServidor.debeMostrarOpcionCreacion(release, true, false)).isFalse();
+        assertThat(AsistenteCreacionServidor.debeMostrarOpcionCreacion(snapshot, false, true)).isFalse();
     }
 
     @Test
@@ -174,15 +166,9 @@ class GestorServidoresTest {
                 return serverDir.resolve("server.jar");
             }
         };
-        Method cargarOpcionesConversion = GestorServidores.class.getDeclaredMethod(
-                "cargarOpcionesConversion",
-                Server.class,
-                ServerPlatformAdapter.class
-        );
-        cargarOpcionesConversion.setAccessible(true);
-
-        @SuppressWarnings("unchecked")
-        List<ServerCreationOption> options = (List<ServerCreationOption>) cargarOpcionesConversion.invoke(gestor, server, adapter);
+        List<ServerCreationOption> options = new ConversorPlataformaServidor(gestor).evaluarDisponibilidadConversion(server, List.of(adapter))
+                .getFirst()
+                .options();
 
         assertThat(options)
                 .extracting(ServerCreationOption::platformVersion)
@@ -251,15 +237,9 @@ class GestorServidoresTest {
                 return serverDir.resolve("server.jar");
             }
         };
-        Method cargarOpcionesConversion = GestorServidores.class.getDeclaredMethod(
-                "cargarOpcionesConversion",
-                Server.class,
-                ServerPlatformAdapter.class
-        );
-        cargarOpcionesConversion.setAccessible(true);
-
-        @SuppressWarnings("unchecked")
-        List<ServerCreationOption> options = (List<ServerCreationOption>) cargarOpcionesConversion.invoke(gestor, server, adapter);
+        List<ServerCreationOption> options = new ConversorPlataformaServidor(gestor).evaluarDisponibilidadConversion(server, List.of(adapter))
+                .getFirst()
+                .options();
 
         assertThat(options)
                 .extracting(ServerCreationOption::minecraftVersion)
@@ -295,7 +275,7 @@ class GestorServidoresTest {
                 ))
         );
 
-        List<GestorServidores.ConversionTargetAvailability> availability = gestor.evaluarDisponibilidadConversion(
+        List<ConversorPlataformaServidor.ConversionTargetAvailability> availability = new ConversorPlataformaServidor(gestor).evaluarDisponibilidadConversion(
                 server,
                 List.of(forge, fabric)
         );
@@ -1132,8 +1112,8 @@ class GestorServidoresTest {
     void construirAvisoConversion_debeMarcarCambioDeEcosistemaComoRiesgoso() throws Exception {
         GestorServidores gestor = new GestorServidores(tempDir.resolve("ServerList.json").toFile());
 
-        GestorServidores.ConversionWarning warning = gestor.construirAvisoConversion(ServerPlatform.FORGE, ServerPlatform.PAPER);
-        GestorServidores.ConversionWarning sameEcosystemWarning = gestor.construirAvisoConversion(ServerPlatform.SPIGOT, ServerPlatform.PAPER);
+        ConversorPlataformaServidor.ConversionWarning warning = new ConversorPlataformaServidor(gestor).construirAvisoConversion(ServerPlatform.FORGE, ServerPlatform.PAPER);
+        ConversorPlataformaServidor.ConversionWarning sameEcosystemWarning = new ConversorPlataformaServidor(gestor).construirAvisoConversion(ServerPlatform.SPIGOT, ServerPlatform.PAPER);
 
         assertThat(warning.crossEcosystem()).isTrue();
         assertThat(warning.message()).contains("ecosistemas distintos").contains("no se migrarán");
@@ -1206,7 +1186,7 @@ class GestorServidoresTest {
             }
         };
 
-        Server converted = gestor.convertirServidorExistente(
+        Server converted = new ConversorPlataformaServidor(gestor).convertirServidorExistente(
                 server,
                 forgeInstaller,
                 new ServerCreationOption(ServerPlatform.FORGE, "1.20.1", "1.20.1-47.4.18", "Forge 1.20.1", "ignored"),
@@ -1299,7 +1279,7 @@ class GestorServidoresTest {
             }
         };
 
-        Server converted = gestor.convertirServidorExistente(
+        Server converted = new ConversorPlataformaServidor(gestor).convertirServidorExistente(
                 server,
                 forgeInstaller,
                 new ServerCreationOption(ServerPlatform.FORGE, "1.20.1", "1.20.1-47.4.18", "Forge 1.20.1", "ignored"),
@@ -1407,7 +1387,7 @@ class GestorServidoresTest {
             }
         };
 
-        Server converted = gestor.convertirServidorExistente(
+        Server converted = new ConversorPlataformaServidor(gestor).convertirServidorExistente(
                 server,
                 paperInstaller,
                 new ServerCreationOption(ServerPlatform.PAPER, "1.20.1", "42", "Paper 1.20.1", "ignored"),
@@ -1526,7 +1506,7 @@ class GestorServidoresTest {
             }
         };
 
-        Server converted = gestor.convertirServidorExistente(
+        Server converted = new ConversorPlataformaServidor(gestor).convertirServidorExistente(
                 server,
                 fabricInstaller,
                 new ServerCreationOption(ServerPlatform.FABRIC, "1.20.1", "0.15.11", "Fabric 1.20.1", "ignored"),
@@ -1565,7 +1545,7 @@ class GestorServidoresTest {
         server.setVersion("1.20.1");
         server.setPlatform(ServerPlatform.VANILLA);
 
-        Server converted = gestor.convertirServidorExistente(
+        Server converted = new ConversorPlataformaServidor(gestor).convertirServidorExistente(
                 server,
                 ServerPlatformAdapters.forPlatform(ServerPlatform.SPIGOT),
                 new ServerCreationOption(ServerPlatform.SPIGOT, "1.20.1", "latest", "Spigot 1.20.1", "ignored"),
@@ -1922,13 +1902,13 @@ class GestorServidoresTest {
         server.setServerDir(serverDir.toString());
         server.setPlatform(modelo.extensions.ServerPlatform.VANILLA);
         server.setVersion("26.2");
-        Method resolverOrigenConversion = GestorServidores.class.getDeclaredMethod(
+        Method resolverOrigenConversion = ConversorPlataformaServidor.class.getDeclaredMethod(
                 "resolverOrigenConversion",
                 Server.class
         );
         resolverOrigenConversion.setAccessible(true);
 
-        Object source = resolverOrigenConversion.invoke(gestor, server);
+        Object source = resolverOrigenConversion.invoke(new ConversorPlataformaServidor(gestor), server);
 
         assertThat(source).isNotNull();
         assertThat(server.getVersion()).isEqualTo("26.2-snapshot-7");

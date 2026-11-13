@@ -45,7 +45,7 @@ public final class GestorConfiguracion {
         } catch (JacksonException e) {
             System.err.println("Error al cargar " + JSON_FILE + ": " + e.getMessage());
             // Guardamos una copia antes de restablecer los valores por defecto para no perder la configuración ilegible.
-            GestorServidores.respaldarArchivoIlegible(file.toPath());
+            Utilidades.respaldarArchivoIlegible(file.toPath());
             DoraConfig config = crearConfiguracionPorDefecto();
             guardarConfiguracion(config);
             return config;
