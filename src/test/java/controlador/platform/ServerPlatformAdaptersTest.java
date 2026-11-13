@@ -643,7 +643,7 @@ class ServerPlatformAdaptersTest {
     }
 
     @Test
-    void creationClients_vanillaDebeExcluirReleasesSinServerJarConocido() {
+    void creationClients_vanillaDebeExcluirReleasesSinServerJarConocido() throws Exception {
         VanillaServerPlatformAdapter adapter = new VanillaServerPlatformAdapter(new FakeMojangApi(null, List.of(
                 new MojangAPI.MinecraftVersionInfo("1.2.5", "release"),
                 new MojangAPI.MinecraftVersionInfo("1.2.4", "release"),
@@ -824,6 +824,76 @@ class ServerPlatformAdaptersTest {
         assertThat(quiltServer.getLoaderVersion()).isEqualTo("0.29.2");
         assertThat(Files.exists(tempDir.resolve("quilt-created").resolve("mods"))).isTrue();
         assertFullServerProperties(tempDir.resolve("quilt-created"), "Dora Quilt 1.21.1");
+    }
+
+    @Test
+    void vanilla_sinConexionDevuelveUnMensajeLegible() {
+        MojangAPI offline = new MojangAPI() {
+            @Override
+            public List<MojangAPI.MinecraftVersionInfo> obtenerListaVersionesConTipo() {
+                throw new RuntimeException(new java.net.ConnectException("Connection refused"));
+            }
+        };
+        VanillaServerPlatformAdapter adapter = new VanillaServerPlatformAdapter(offline);
+
+        assertThatThrownBy(adapter::listCreationOptions)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Revisa la conexión")
+                .hasMessageNotContaining("java.net");
+    }
+
+    @Test
+    void install_paperCompruebaElSha256YBorraDescargasDanadas() throws Exception {
+        PlatformRemoteLookupPolicy.clearForTests();
+        Path sourceJar = tempDir.resolve("downloads-hash").resolve("runtime.jar");
+        TestWorldFixtures.createValidServerJar(sourceJar.getParent(), sourceJar.getFileName().toString(), "{\"id\":\"1.21.1\"}");
+        String realSha256 = DownloadChecksum.hash(sourceJar, "SHA-256");
+        String buildsUrl = "https://fill.papermc.io/v3/projects/paper/versions/1.21.1/builds";
+        String buildTemplate = """
+                [
+                  {"id":"42","channel":"STABLE","downloads":{"server:default":{"url":"https://example.test/paper.jar","checksums":{"sha256":"%s"}}}}
+                ]
+                """;
+
+        PaperServerPlatformAdapter okAdapter = new PaperServerPlatformAdapter(new PaperDownloadsClient(
+                new FakePlatformHttpClient(Map.of(buildsUrl, buildTemplate.formatted(realSha256)))));
+        okAdapter.install(new Server(), request(tempDir.resolve("paper-hash-ok"), "1.21.1", "42", sourceJar));
+        assertThat(tempDir.resolve("paper-hash-ok").resolve("paper-1.21.1-42.jar")).isRegularFile();
+
+        PlatformRemoteLookupPolicy.clearForTests();
+        PaperServerPlatformAdapter badAdapter = new PaperServerPlatformAdapter(new PaperDownloadsClient(
+                new FakePlatformHttpClient(Map.of(buildsUrl, buildTemplate.formatted("00".repeat(32))))));
+        Path badDir = tempDir.resolve("paper-hash-bad");
+        assertThatThrownBy(() -> badAdapter.install(new Server(), request(badDir, "1.21.1", "42", sourceJar)))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("dañada");
+        // El archivo malo no se queda en la carpeta para no reutilizarse en el siguiente intento.
+        assertThat(badDir.resolve("paper-1.21.1-42.jar")).doesNotExist();
+    }
+
+    @Test
+    void install_purpurCompruebaElMd5PublicadoSiEstaDisponible() throws Exception {
+        PlatformRemoteLookupPolicy.clearForTests();
+        Path sourceJar = tempDir.resolve("downloads-md5").resolve("runtime.jar");
+        TestWorldFixtures.createValidServerJar(sourceJar.getParent(), sourceJar.getFileName().toString(), "{\"id\":\"1.21.1\"}");
+
+        PurpurServerPlatformAdapter badAdapter = new PurpurServerPlatformAdapter(new PurpurDownloadsClient(new FakePlatformHttpClient(Map.of(
+                "https://api.purpurmc.org/v2/purpur/1.21.1/99",
+                "{\"md5\":\"" + "0".repeat(32) + "\"}"
+        ))));
+        Path badDir = tempDir.resolve("purpur-md5-bad");
+        assertThatThrownBy(() -> badAdapter.install(new Server(), request(badDir, "1.21.1", "99", sourceJar)))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("MD5");
+        assertThat(badDir.resolve("purpur-1.21.1-99.jar")).doesNotExist();
+
+        PlatformRemoteLookupPolicy.clearForTests();
+        PurpurServerPlatformAdapter okAdapter = new PurpurServerPlatformAdapter(new PurpurDownloadsClient(new FakePlatformHttpClient(Map.of(
+                "https://api.purpurmc.org/v2/purpur/1.21.1/99",
+                "{\"md5\":\"" + DownloadChecksum.hash(sourceJar, "MD5") + "\"}"
+        ))));
+        okAdapter.install(new Server(), request(tempDir.resolve("purpur-md5-ok"), "1.21.1", "99", sourceJar));
+        assertThat(tempDir.resolve("purpur-md5-ok").resolve("purpur-1.21.1-99.jar")).isRegularFile();
     }
 
     @Test

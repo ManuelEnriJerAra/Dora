@@ -1183,7 +1183,7 @@ public class VentanaPrincipal extends JFrame {
         menu.add(contador);
 
         if(activos.isEmpty()){
-            MenuItem ninguno = new MenuItem("Ningun servidor activo");
+            MenuItem ninguno = new MenuItem("Ningún servidor activo");
             ninguno.setEnabled(false);
             menu.add(ninguno);
         } else {
@@ -1348,22 +1348,13 @@ public class VentanaPrincipal extends JFrame {
         );
         if(res != 0) return;
 
-        this.setEnabled(false);
-        this.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-
-        new Thread(() -> {
-            try{
-                gestorServidores.detenerServidoresActivosParaSalir();
-            } finally{
-                SwingUtilities.invokeLater(() -> {
-                    try {
-                        VentanaPrincipal.this.dispose();
-                    } finally {
-                        System.exit(0);
-                    }
-                });
+        SalidaServidoresActivos.detenerYSalir(this, gestorServidores, () -> {
+            try {
+                VentanaPrincipal.this.dispose();
+            } finally {
+                System.exit(0);
             }
-        }, "shutdown-servidores").start();
+        });
     }
 
     private void desinstalarBandejaSistema(){

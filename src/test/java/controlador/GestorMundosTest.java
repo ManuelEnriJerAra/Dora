@@ -81,4 +81,20 @@ class GestorMundosTest {
         assertThat(serverDir.resolve(GestorMundos.DIRECTORIO_MUNDOS).resolve("world")).isDirectory();
     }
 
+
+    @Test
+    void quitarArchivosDePrevisualizacion_noExportaLaCacheDelMapa() throws Exception {
+        Path exportado = Files.createDirectories(tempDir.resolve("export-preview").resolve("world"));
+        Files.writeString(exportado.resolve("level.dat"), "x");
+        Files.writeString(exportado.resolve("preview.png"), "png");
+        Files.writeString(exportado.resolve(controlador.world.WorldFilesService.PREVIEW_METADATA_FILE), "meta");
+        Files.writeString(exportado.resolve(controlador.world.WorldFilesService.WORLD_METADATA_FILE), "config");
+
+        GestorMundos.quitarArchivosDePrevisualizacion(exportado);
+
+        assertThat(exportado.resolve("preview.png")).doesNotExist();
+        assertThat(exportado.resolve(controlador.world.WorldFilesService.PREVIEW_METADATA_FILE)).doesNotExist();
+        assertThat(exportado.resolve("level.dat")).exists();
+        assertThat(exportado.resolve(controlador.world.WorldFilesService.WORLD_METADATA_FILE)).exists();
+    }
 }

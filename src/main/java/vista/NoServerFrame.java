@@ -480,21 +480,12 @@ public class NoServerFrame extends JFrame {
         );
         if (res != 0) return;
 
-        this.setEnabled(false);
-        this.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-
-        new Thread(() -> {
+        SalidaServidoresActivos.detenerYSalir(this, gestorServidores, () -> {
             try {
-                gestorServidores.detenerServidoresActivosParaSalir();
+                NoServerFrame.this.dispose();
             } finally {
-                SwingUtilities.invokeLater(() -> {
-                    try {
-                        NoServerFrame.this.dispose();
-                    } finally {
-                        System.exit(0);
-                    }
-                });
+                System.exit(0);
             }
-        }, "shutdown-servidores").start();
+        });
     }
 }

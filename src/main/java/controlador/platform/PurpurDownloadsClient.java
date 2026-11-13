@@ -59,6 +59,24 @@ class PurpurDownloadsClient {
         return BASE_URL + "/" + minecraftVersion + "/" + resolvedBuild + "/download";
     }
 
+    /**
+     * MD5 publicado por Purpur para la build, o {@code null} si no se puede consultar
+     * (en ese caso la descarga no se comprueba).
+     */
+    String md5(String minecraftVersion, String buildId) {
+        String build = buildId == null || buildId.isBlank() ? LATEST_BUILD : buildId;
+        try {
+            JsonElement info = httpClient.getJson(BASE_URL + "/" + minecraftVersion + "/" + build);
+            if (info == null || !info.isJsonObject()) {
+                return null;
+            }
+            JsonElement md5 = info.getAsJsonObject().get("md5");
+            return md5 == null || md5.isJsonNull() ? null : md5.getAsString();
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
     private String latestBuild(String minecraftVersion) throws IOException {
         JsonObject version = httpClient.getJson(BASE_URL + "/" + minecraftVersion).getAsJsonObject();
         JsonObject builds = version.getAsJsonObject("builds");

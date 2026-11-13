@@ -87,7 +87,7 @@ final class PanelExtensiones extends JPanel {
     PanelExtensiones(GestorServidores gestorServidores, Server server) {
         this.gestorServidores = gestorServidores;
         this.server = server;
-        this.detailsTitleLabel.setText("Ningun " + extensionSingularLower() + " seleccionado");
+        this.detailsTitleLabel.setText("Ningún " + extensionSingularLower() + " seleccionado");
 
         setLayout(new BorderLayout());
         setOpaque(false);
@@ -368,7 +368,7 @@ final class PanelExtensiones extends JPanel {
         return ExtensionDetailsLayout.buildInfoGrid(List.of(
                 ExtensionDetailsLayout.buildInfoRow("Versión instalada", detailsInstalledVersionLabel),
                 ExtensionDetailsLayout.buildInfoRow("Versión remota", detailsRemoteVersionLabel),
-                ExtensionDetailsLayout.buildInfoRow("Actualizacion", detailsUpdateLabel),
+                ExtensionDetailsLayout.buildInfoRow("Actualización", detailsUpdateLabel),
                 ExtensionDetailsLayout.buildInfoRow("Archivo", detailsFileLabel),
                 ExtensionDetailsLayout.buildInfoRow("Ruta", detailsPathLabel),
                 ExtensionDetailsLayout.buildInfoRow(getMetadataPlatformLabel(), detailsLoadersLabel),
@@ -1402,7 +1402,7 @@ final class PanelExtensiones extends JPanel {
         String base = switch (updateState == null ? ExtensionUpdateState.UNKNOWN : updateState) {
             case UNTRACKED -> "Sin seguimiento remoto";
             case UP_TO_DATE -> "Al dia";
-            case UPDATE_AVAILABLE -> "Actualizacion disponible";
+            case UPDATE_AVAILABLE -> "Actualización disponible";
             case UNKNOWN -> "Estado remoto desconocido";
         };
         if (message == null || message.isBlank()) {

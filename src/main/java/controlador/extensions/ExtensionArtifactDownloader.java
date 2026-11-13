@@ -57,7 +57,7 @@ public final class ExtensionArtifactDownloader implements FileDownloader {
             Thread.currentThread().interrupt();
             throw new IOException("La descarga de la extensión ha sido interrumpida.", ex);
         } catch (IllegalArgumentException ex) {
-            throw new IOException("No se ha podido construir la peticion de descarga.", ex);
+            throw new IOException("No se ha podido construir la petición de descarga.", ex);
         }
 
         int statusCode = response.statusCode();

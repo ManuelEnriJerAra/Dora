@@ -45,6 +45,7 @@ public class MojangAPI {
     private static final int DOWNLOAD_MAX_ATTEMPTS = 3;
     private static final String NO_SERVER_JAR_URL = "";
     private static final Map<String, String> SERVER_JAR_URL_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, String> SERVER_JAR_SHA1_CACHE = new ConcurrentHashMap<>();
     private static final ExecutorService BACKGROUND_REQUESTS = Executors.newFixedThreadPool(4, runnable -> {
         Thread thread = new Thread(runnable, "mojang-api-worker");
         thread.setDaemon(true);
@@ -183,12 +184,27 @@ public class MojangAPI {
                 SERVER_JAR_URL_CACHE.put(versionId, NO_SERVER_JAR_URL);
                 return null;
             }
+            JsonNode sha1Node = serverNode.get("sha1");
+            if (sha1Node != null && !sha1Node.isNull()) {
+                SERVER_JAR_SHA1_CACHE.put(versionId, sha1Node.asString());
+            }
             SERVER_JAR_URL_CACHE.put(versionId, serverUrl);
             return serverUrl;
 
         } catch (Exception e){
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * SHA-1 que publica Mojang para el server.jar de la versión, o {@code null} si no se conoce.
+     * Se rellena al consultar {@link #obtenerUrlServerJar(String)}.
+     */
+    public String obtenerSha1ServerJar(String versionId) {
+        if (versionId == null || versionId.isBlank()) {
+            return null;
+        }
+        return SERVER_JAR_SHA1_CACHE.get(versionId);
     }
 
     public interface DownloadProgressListener {

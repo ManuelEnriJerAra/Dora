@@ -1003,7 +1003,7 @@ final class ExtensionMarketplaceDialog extends JDialog {
             loaderCombo.setSelectedIndex(0);
             return;
         }
-        loaderModel.addElement(new PlatformFilterOption("Segun servidor (" + labelForPlatform(serverPlatform) + ")", serverPlatform, true));
+        loaderModel.addElement(new PlatformFilterOption("Según servidor (" + labelForPlatform(serverPlatform) + ")", serverPlatform, true));
         loaderModel.addElement(new PlatformFilterOption("Cualquiera", ServerPlatform.UNKNOWN, false));
 
         List<ServerPlatform> options = switch (serverEcosystem()) {
@@ -1675,7 +1675,7 @@ final class ExtensionMarketplaceDialog extends JDialog {
             if (message.length() > 0) {
                 message.append('\n');
             }
-            message.append("Tambien hay complementos opcionales que pueden mejorar la experiencia, pero no son obligatoríos.\n\n");
+            message.append("También hay complementos opcionales que pueden mejorar la experiencia, pero no son obligatorios.\n\n");
             appendDependencyPromptGroup(message, "Opcionales", dependencies.resolvedOptional(), dependencies.unresolvedOptional());
         }
         Object[] options = {"Añadir", "Cancelar"};

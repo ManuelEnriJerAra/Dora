@@ -86,7 +86,7 @@ class ExtensionHttpClient {
                         throw new IOException("La consulta HTTP ha sido interrumpida.", ex);
                     } catch (IllegalArgumentException ex) {
                         LOGGER.log(Level.WARNING, "Peticion HTTP inválida para " + uri, ex);
-                        throw new IOException("No se ha podido construir la peticion HTTP.", ex);
+                        throw new IOException("No se ha podido construir la petición HTTP.", ex);
                     } catch (IOException ex) {
                         lastError = ex;
                         LOGGER.log(

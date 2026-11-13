@@ -29,6 +29,7 @@ import controlador.extensions.ServerExtensionsService;
 import modelo.Server;
 import modelo.ServerConfig;
 import modelo.automation.ServerAutomationRule;
+import controlador.platform.JavaRuntimeCompatibility;
 import controlador.platform.ServerInstallationRequest;
 import controlador.platform.ServerCreationOption;
 import controlador.platform.FileDownloader;
@@ -80,6 +81,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -1920,12 +1922,12 @@ public class GestorServidores {
         String newFolder = targetEcosystem == ServerEcosystemType.MODS ? "mods" : "plugins";
         JOptionPane.showMessageDialog(
                 null,
-                "La conversion cambio de ecosistema. Los archivos anteriores siguen en "
+                "La conversión cambió de ecosistema. Los archivos anteriores siguen en "
                         + Path.of(server.getServerDir()).resolve(oldFolder)
                         + ". Las nuevas extensiones deben instalarse en "
                         + Path.of(server.getServerDir()).resolve(newFolder)
-                        + ". La cache local de extensiones se ha actualizado conservando los metadatos anteriores.",
-                "Conversion completada",
+                        + ". La caché local de extensiones se ha actualizado conservando los metadatos anteriores.",
+                "Conversión completada",
                 JOptionPane.INFORMATION_MESSAGE
         );
     }
@@ -2938,40 +2940,39 @@ public class GestorServidores {
                 .toList();
     }
 
-    // Detener todos los servidores activos para salir del programa
-    public void detenerServidoresActivosParaSalir() {
+    // Pedir una parada segura ("stop") a todos los servidores activos para salir del programa.
+    // Devuelve los servidores a los que se ha pedido la parada.
+    public List<Server> pedirParadaServidoresActivosParaSalir() {
         List<Server> activos = getServidoresActivos();
-        if (activos.isEmpty()) return;
-
         for (Server server : activos) {
             try {
-                safePararServidor(server); // hacemos una parada segura en cada uno de ellos
+                safePararServidor(server);
             } catch (RuntimeException ignored) {
             }
         }
+        return activos;
+    }
 
-        long cuentaAtras = System.currentTimeMillis() + 7_000;
-        // contamos 7 segundos
-        for (Server server : activos) {
-            Process proceso = server.getServerProcess();
+    // Esperar hasta "espera" a que los servidores indicados terminen (incluidos procesos hijos).
+    // Devuelve los que siguen vivos. No fuerza ningún cierre: guardar el mundo puede tardar.
+    public List<Server> esperarParadaServidores(List<Server> servidores, Duration espera) throws InterruptedException {
+        long limite = System.nanoTime() + Math.max(0L, espera.toNanos());
+        for (Server server : servidores) {
+            Process proceso = server == null ? null : server.getServerProcess();
             if (proceso == null) continue;
-            if (!proceso.isAlive()) continue;
-            // si el proceso está vivo restamos los segundos transcurridos
-            long restante = cuentaAtras - System.currentTimeMillis();
+            long restante = limite - System.nanoTime();
             if (restante <= 0) break;
-            try {
-                proceso.waitFor(restante, java.util.concurrent.TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
+            proceso.waitFor(restante, TimeUnit.NANOSECONDS);
         }
+        return servidores.stream()
+                .filter(s -> s != null && ProcessTreeTerminator.isTreeAlive(s.getServerProcess()))
+                .toList();
+    }
 
-        // si no se han podido parar los servidores de forma segura forzamos su cierre
-        for (Server server : activos) {
-            Process proceso = server.getServerProcess();
-            if (proceso == null) continue;
-            if (!proceso.isAlive()) continue;
+    // Forzar el cierre de los servidores indicados que sigan vivos.
+    public void forzarPararServidores(List<Server> servidores) {
+        for (Server server : servidores) {
+            if (server == null || !ProcessTreeTerminator.isTreeAlive(server.getServerProcess())) continue;
             try {
                 forzarPararServidor(server);
             } catch (RuntimeException ignored) {
@@ -2986,11 +2987,102 @@ public class GestorServidores {
 
     // ===== MÉTODOS DE CONTROL DEL SERVIDOR =====
 
-    public synchronized void iniciarServidor(Server server) throws IOException {
+    // Cerrojo de arranque: evita dobles arranques y que dos servidores elijan el mismo puerto.
+    // No se mantiene mientras se muestra un diálogo: si un hilo de fondo (automatizaciones,
+    // reinicio) lo tuviera esperando al EDT y el EDT intentara arrancar otro servidor, la app se congelaría.
+    private final Object inicioLock = new Object();
+
+    private record SolicitudPuertoInicio(String bindHost,
+                                         int puertoOcupado,
+                                         boolean puertoDefectoDisponible,
+                                         int puertoRecomendado) {
+    }
+
+    public void iniciarServidor(Server server) throws IOException {
+        if (!confirmarCompatibilidadJava(server)) {
+            return;
+        }
+        Integer puertoElegido = null;
+        while (true) {
+            SolicitudPuertoInicio solicitud;
+            synchronized (inicioLock) {
+                solicitud = iniciarServidorBloqueado(server, puertoElegido);
+            }
+            if (solicitud == null) {
+                return;
+            }
+            // El puerto está ocupado: preguntamos al usuario fuera del cerrojo.
+            puertoElegido = solicitarPuertoAlternativo(
+                    server,
+                    solicitud.bindHost(),
+                    solicitud.puertoOcupado(),
+                    solicitud.puertoDefectoDisponible(),
+                    solicitud.puertoRecomendado()
+            );
+            if (puertoElegido == null) {
+                server.appendConsoleLinea("[INFO] Inicio cancelado por selección de puerto.");
+                return;
+            }
+        }
+    }
+
+    // Servidores para los que el usuario ya ha aceptado el aviso de Java en esta sesión.
+    private final Set<String> avisoJavaAceptado = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    // Avisa si la versión de Minecraft del servidor no encaja con el Java del sistema (el que usan los arranques).
+    // Devuelve false si el usuario cancela el inicio. Se llama fuera de inicioLock porque puede mostrar un diálogo.
+    private boolean confirmarCompatibilidadJava(Server server) {
+        if (server == null || (server.getServerProcess() != null && server.getServerProcess().isAlive())) {
+            return true;
+        }
+        String aviso;
+        try {
+            aviso = JavaRuntimeCompatibility.warningFor(
+                    server.getVersion(),
+                    server.getPlatform() == ServerPlatform.FORGE,
+                    JavaRuntimeCompatibility.detectPathJavaMajor()
+            );
+        } catch (RuntimeException e) {
+            return true;
+        }
+        if (aviso == null) {
+            return true;
+        }
+        server.appendConsoleLinea("[WARN] " + aviso);
+        String clave = server.getId() == null ? server.getServerDir() : server.getId();
+        // Arranques automáticos o sin interfaz: solo el aviso en consola.
+        if (GraphicsEnvironment.isHeadless() || !SwingUtilities.isEventDispatchThread()
+                || (clave != null && avisoJavaAceptado.contains(clave))) {
+            return true;
+        }
+        Window owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+        Object[] opciones = {"Iniciar igualmente", "Cancelar"};
+        int respuesta = JOptionPane.showOptionDialog(
+                owner,
+                aviso + "\n\nDora usa el Java instalado en el sistema para arrancar los servidores.",
+                "Versión de Java",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                opciones,
+                opciones[1]
+        );
+        if (respuesta != 0) {
+            server.appendConsoleLinea("[INFO] Inicio cancelado por la versión de Java.");
+            return false;
+        }
+        if (clave != null) {
+            avisoJavaAceptado.add(clave);
+        }
+        return true;
+    }
+
+    // Devuelve una solicitud de puerto si hay que preguntar al usuario; null si ha terminado (arrancado o fallido).
+    private SolicitudPuertoInicio iniciarServidorBloqueado(Server server, Integer puertoElegido) throws IOException {
         // Compruebo si está en marcha, si no, prosigo
         if(server.getServerProcess()!=null && server.getServerProcess().isAlive()) {
             server.appendConsoleLinea("[INFO] El servidor ya está iniciado. ");
-            return;
+            return null;
         }
         Path dir = Path.of(server.getServerDir());
         try {
@@ -3005,25 +3097,24 @@ public class GestorServidores {
             jar = adapter.resolveExecutableJar(dir);
         } catch (RuntimeException e) {
             server.appendConsoleLinea("[ERROR] No se ha podido encontrar el .jar del servidor: " + e.getMessage());
-            return;
+            return null;
         } catch (IOException e) {
             server.appendConsoleLinea("[ERROR] No se ha podido resolver el .jar del servidor: " + e.getMessage());
-            return;
+            return null;
         }
         if (jar == null && adapter.requiresExecutableJarForStart()) {
             server.appendConsoleLinea("[ERROR] No se ha podido encontrar el .jar del servidor.");
-            return;
+            return null;
         }
 
         // Creo un proceso con la dirección del servidor y la RAM elegida y en el primer puerto que esté libre desde 25565
         ServerConfig serverConfig = asegurarServerConfig(server);
         sincronizarPuertoConfigDesdeProperties(server);
-        Integer puertoSeleccionado = resolverPuertoParaInicio(server, serverConfig);
-        if (puertoSeleccionado == null) {
-            server.appendConsoleLinea("[INFO] Inicio cancelado por selección de puerto.");
-            return;
+        Object resolucionPuerto = resolverPuertoParaInicio(server, serverConfig, puertoElegido);
+        if (resolucionPuerto instanceof SolicitudPuertoInicio solicitud) {
+            return solicitud;
         }
-        int puerto = puertoSeleccionado;
+        int puerto = (Integer) resolucionPuerto;
         if(puerto != serverConfig.getPuerto()){
             // si el puerto no está libre pasamos al siguiente
             serverConfig.setPuerto(puerto);
@@ -3042,7 +3133,7 @@ public class GestorServidores {
             pb = adapter.buildStartProcess(server, jar);
         } catch (RuntimeException e) {
             server.appendConsoleLinea("[ERROR] No se ha podido preparar el arranque del servidor: " + e.getMessage());
-            return;
+            return null;
         }
         server.appendConsoleLinea("[INFO] Iniciando servidor con "+serverConfig.getRamInit()+"M y "+serverConfig.getRamMax()+"M de RAM.");
 
@@ -3087,13 +3178,14 @@ public class GestorServidores {
             server.appendConsoleLinea("[ERROR] El servidor no se pudo iniciar"+e.getMessage());
             AppErrorReporter.report("El proceso del servidor no se pudo iniciar.", e);
         }
+        return null;
     }
 
     // Eliminar el proceso de servidor, a evitar, puede provocar corrupción de mundos
     public void forzarPararServidor(Server server){
         Process proceso = server.getServerProcess();
 
-        if(proceso==null || !proceso.isAlive()) {
+        if(!ProcessTreeTerminator.isTreeAlive(proceso)) {
             server.appendConsoleLinea("[INFO] El servidor no está en ejecución");
             server.setServerProcess(null);
             server.setIniciando(false);
@@ -3102,25 +3194,20 @@ public class GestorServidores {
         }
         server.appendConsoleLinea("[INFO] Forzando cierre del servidor...");
 
-        // 1er Intento
-        proceso.destroy();
+        // Cerramos el árbol completo: en Forge/NeoForge el proceso guardado es run.bat/run.sh y el
+        // servidor Java real es un proceso hijo que, si no, quedaría vivo y huérfano.
+        boolean destruido = false;
         try{
-            // esperamos a ver si lo hemos destruido
-            boolean destruido = proceso.waitFor(3, TimeUnit.SECONDS);
-            if(!destruido){ // 2do intento, ahora es personal
-                proceso.destroyForcibly();
-                destruido = proceso.waitFor(3, TimeUnit.SECONDS);
-
-            }
+            destruido = ProcessTreeTerminator.terminate(proceso, Duration.ofSeconds(3), Duration.ofSeconds(3));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally{
             if(destruido){
                 server.appendConsoleLinea("[INFO] Se ha cerrado el servidor de forma forzada, no se han guardado los cambios.");
             }
             else{
                 server.appendConsoleLinea("[ERROR] No se ha podido cerrar el servidor.");
             }
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally{
             // Si no está vivo limpiamos referencia
             if(!proceso.isAlive()) server.setServerProcess(null);
             if(!proceso.isAlive()) server.setIniciando(false);
@@ -3207,35 +3294,49 @@ public class GestorServidores {
         return serverConfig;
     }
 
-    private Integer resolverPuertoParaInicio(Server server, ServerConfig serverConfig) {
-        int puertoGuardado = puertoConfigurado(serverConfig);
+    // Devuelve el puerto (Integer) a usar o una SolicitudPuertoInicio si hay que preguntar al usuario.
+    // Debe llamarse con inicioLock tomado.
+    private Object resolverPuertoParaInicio(Server server, ServerConfig serverConfig, Integer puertoElegido) {
         String bindHost = resolveServerBindHost(server);
+        Set<Integer> reservados = puertosDeOtrosServidoresActivos(server);
+        int puertoObjetivo = puertoElegido != null ? puertoElegido : puertoConfigurado(serverConfig);
 
-        if (isPortAvailable(bindHost, puertoGuardado)) {
-            probarSiguientePuerto(puertoGuardado);
-            return puertoGuardado;
+        if (isPortAvailableForStart(bindHost, puertoObjetivo, reservados)) {
+            probarSiguientePuerto(puertoObjetivo);
+            return puertoObjetivo;
         }
 
-        Integer siguientePuerto = buscarSiguientePuertoDisponible(bindHost, puertoGuardado + 1);
+        Integer siguientePuerto = null;
+        for (int p = Math.max(1, puertoObjetivo + 1); p <= PUERTO_MAXIMO; p++) {
+            if (isPortAvailableForStart(bindHost, p, reservados)) {
+                siguientePuerto = p;
+                break;
+            }
+        }
         if (siguientePuerto == null) {
-            throw new RuntimeException("No hay puertos disponibles entre " + Math.max(1, puertoGuardado + 1) + " y 65535");
+            throw new RuntimeException("No hay puertos disponibles entre " + Math.max(1, puertoObjetivo + 1) + " y 65535");
         }
-
-        Integer puertoElegido = solicitarPuertoAlternativo(
-                server,
+        return new SolicitudPuertoInicio(
                 bindHost,
-                puertoGuardado,
-                isPortAvailable(bindHost, PUERTO_MINECRAFT_DEFECTO),
+                puertoObjetivo,
+                isPortAvailableForStart(bindHost, PUERTO_MINECRAFT_DEFECTO, reservados),
                 siguientePuerto
         );
-        if (puertoElegido != null) {
-            probarSiguientePuerto(puertoElegido);
-        }
-        return puertoElegido;
     }
 
-    private Integer resolverPuertoParaInicio(Server server) {
-        return resolverPuertoParaInicio(server, asegurarServerConfig(server));
+    // Un servidor recién lanzado tarda unos segundos en abrir su puerto y, hasta entonces, el puerto parece libre.
+    // Tratamos como ocupados los puertos de los demás servidores que Dora tiene en marcha.
+    private Set<Integer> puertosDeOtrosServidoresActivos(Server server) {
+        Set<Integer> puertos = new HashSet<>();
+        for (Server otro : getServidoresActivos()) {
+            if (otro == server || otro.getServerConfig() == null) continue;
+            puertos.add(otro.getServerConfig().getPuerto());
+        }
+        return puertos;
+    }
+
+    private static boolean isPortAvailableForStart(String bindHost, int port, Set<Integer> reservados) {
+        return !reservados.contains(port) && isPortAvailable(bindHost, port);
     }
 
     private int puertoConfigurado(ServerConfig serverConfig) {

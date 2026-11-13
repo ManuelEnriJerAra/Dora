@@ -75,7 +75,7 @@ class PaperDownloadsClient {
             if (buildId.equals(id)) {
                 String url = downloadUrlFromBuild(object);
                 if (url != null && !url.isBlank()) {
-                    return new PaperBuild(id, url);
+                    return new PaperBuild(id, url, sha256FromBuild(object));
                 }
             }
         }
@@ -115,7 +115,7 @@ class PaperDownloadsClient {
             String url = downloadUrlFromBuild(object);
             String id = stringValue(object, "id");
             if (url != null && !url.isBlank() && id != null && !id.isBlank()) {
-                return new PaperBuild(id, url);
+                return new PaperBuild(id, url, sha256FromBuild(object));
             }
         }
         return null;
@@ -128,7 +128,7 @@ class PaperDownloadsClient {
             String url = downloadUrlFromBuild(object);
             String id = stringValue(object, "id");
             if (url != null && !url.isBlank() && id != null && !id.isBlank()) {
-                return new PaperBuild(id, url);
+                return new PaperBuild(id, url, sha256FromBuild(object));
             }
         }
         return null;
@@ -140,11 +140,21 @@ class PaperDownloadsClient {
         return serverDefault == null ? null : stringValue(serverDefault, "url");
     }
 
+    private String sha256FromBuild(JsonObject build) {
+        JsonObject downloads = build == null ? null : build.getAsJsonObject("downloads");
+        JsonObject serverDefault = downloads == null ? null : downloads.getAsJsonObject("server:default");
+        JsonObject checksums = serverDefault == null ? null : serverDefault.getAsJsonObject("checksums");
+        return checksums == null ? null : stringValue(checksums, "sha256");
+    }
+
     private String stringValue(JsonObject object, String field) {
         JsonElement element = object == null ? null : object.get(field);
         return element == null || element.isJsonNull() ? null : element.getAsString();
     }
 
-    record PaperBuild(String id, String downloadUrl) {
+    record PaperBuild(String id, String downloadUrl, String sha256) {
+        PaperBuild(String id, String downloadUrl) {
+            this(id, downloadUrl, null);
+        }
     }
 }

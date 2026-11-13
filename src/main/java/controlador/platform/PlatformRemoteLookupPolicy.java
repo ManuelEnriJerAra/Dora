@@ -81,7 +81,7 @@ final class PlatformRemoteLookupPolicy {
         return key.trim();
     }
 
-    private static String remoteFailureMessage() {
+    static String remoteFailureMessage() {
         return REMOTE_FAILURE_MESSAGE;
     }
 
