@@ -404,20 +404,26 @@ public final class GestorMundos {
         for (Path destino : destinos) {
             if (Files.exists(destino)) yaExistian.add(destino);
         }
-        try {
-            DialogoTareaEnCurso.ejecutarConProgreso(titulo, descripcion, true, 300, progreso -> {
+        DialogoTareaEnCurso.ejecutarConProgreso(titulo, descripcion, true, 300, progreso -> {
+            try {
                 copiarConDimensiones(origenBase, destinoBase, progreso);
-                return null;
-            });
-        } catch (IOException e) {
-            for (Path destino : destinos) {
-                if (yaExistian.contains(destino)) continue;
-                try {
-                    Utilidades.eliminarDirectorio(destino);
-                } catch (IOException ignored) {
-                }
+            } catch (Exception e) {
+                // Se borra aquí, todavía en segundo plano: un mundo con miles de archivos tarda en borrarse.
+                progreso.actualizar(-1d, "Borrando la copia incompleta...");
+                borrarCopiaIncompleta(destinos, yaExistian);
+                throw e;
             }
-            throw e;
+            return null;
+        });
+    }
+
+    private static void borrarCopiaIncompleta(List<Path> destinos, List<Path> yaExistian) {
+        for (Path destino : destinos) {
+            if (yaExistian.contains(destino)) continue;
+            try {
+                Utilidades.eliminarDirectorio(destino);
+            } catch (IOException ignored) {
+            }
         }
     }
 
