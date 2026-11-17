@@ -72,6 +72,7 @@ final class ParadaServidor {
             server.appendConsoleLinea("[INFO] El servidor no está en ejecución");
             server.setServerProcess(null);
             server.setIniciando(false);
+            server.setDeteniendo(false);
             gestor.notificarEstadoServidor(server);
             return;
         }
@@ -93,7 +94,10 @@ final class ParadaServidor {
             }
             // Si no está vivo limpiamos referencia
             if(!proceso.isAlive()) server.setServerProcess(null);
-            if(!proceso.isAlive()) server.setIniciando(false);
+            if(!proceso.isAlive()) {
+                server.setIniciando(false);
+                server.setDeteniendo(false);
+            }
             gestor.notificarEstadoServidor(server);
         }
     }

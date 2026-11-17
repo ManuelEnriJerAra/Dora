@@ -52,6 +52,11 @@ import javax.imageio.ImageIO;
 @JsonIgnoreProperties(ignoreUnknown = true)
 
 public class Server {
+    // Muestras de estadísticas a resolución de 1 s: más allá se agregan en el histórico.
+    // Guardar semanas a 1 s generaba ficheros de cientos de MB reescritos cada pocos segundos.
+    public static final int VENTANA_RECIENTE_POR_DEFECTO_SEGUNDOS = 6 * 60 * 60;
+    public static final int VENTANA_RECIENTE_MAXIMA_SEGUNDOS = 72 * 60 * 60;
+
     // ===== DATOS PERSISTENTES =====
     private String id; // identificador único del servidor, es persistente, lo guardamos en el JSON
     private String displayName; // nombre que el usuario le da al servidor, es persistente, lo guardamos en el JSON
@@ -99,6 +104,8 @@ public class Server {
     @JsonIgnore transient Deque<String> rawLogLineQueue = new ArrayDeque<>();
     @JsonIgnore transient Boolean restartPending = false; // reinicio pendiente
     @JsonIgnore transient Boolean iniciando = false; // arranque en progreso
+    @JsonIgnore transient Boolean deteniendo = false; // parada solicitada, el proceso sigue vivo
+    @JsonIgnore transient long paradaSolicitadaMillis = 0L; // momento en que se pidió la parada
 
     // ===== CONSTRUCTORES =====
 
@@ -114,7 +121,7 @@ public class Server {
         this.serverConfig = new ServerConfig();
         this.estadisticasRangoSegundos = 300;
         this.estadisticasPersistenciaActiva = true;
-        this.estadisticasVentanaRecienteSegundos = 30 * 24 * 60 * 60;
+        this.estadisticasVentanaRecienteSegundos = VENTANA_RECIENTE_POR_DEFECTO_SEGUNDOS;
         this.estadisticasResolucionHistoricaSegundos = 60;
         this.estadisticasCpuActiva = true;
         this.estadisticasCpuHistorial = true;

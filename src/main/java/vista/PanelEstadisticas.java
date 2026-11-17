@@ -59,20 +59,17 @@ public class PanelEstadisticas extends JPanel {
     private static final int CHART_BOTTOM_PADDING = 28;
     private static final Pattern PLAYER_JOIN = Pattern.compile("([^\\s]+) joined the game");
     private static final Pattern PLAYER_LEFT = Pattern.compile("([^\\s]+) left the game");
-    private static final int[] RECENT_WINDOW_OPTIONS = {
-            30 * 24 * 60 * 60,
-            60 * 24 * 60 * 60,
-            90 * 24 * 60 * 60,
-            120 * 24 * 60 * 60,
-            150 * 24 * 60 * 60,
-            180 * 24 * 60 * 60,
-            210 * 24 * 60 * 60,
-            240 * 24 * 60 * 60,
-            270 * 24 * 60 * 60,
-            300 * 24 * 60 * 60,
-            330 * 24 * 60 * 60,
-            360 * 24 * 60 * 60
+    static final int[] RECENT_WINDOW_OPTIONS = {
+            60 * 60,
+            3 * 60 * 60,
+            6 * 60 * 60,
+            12 * 60 * 60,
+            24 * 60 * 60,
+            48 * 60 * 60,
+            Server.VENTANA_RECIENTE_MAXIMA_SEGUNDOS
     };
+    // Cada cuánto se escribe el historial a disco (se reescribe entero).
+    static final int HISTORY_FLUSH_INTERVAL_SECONDS = 60;
     private static final int[] HISTORICAL_RESOLUTION_OPTIONS = {
             60,
             30 * 60,
@@ -107,7 +104,7 @@ public class PanelEstadisticas extends JPanel {
 
     static {
         BACKGROUND_SAMPLER.scheduleAtFixedRate(PanelEstadisticas::sampleActiveServers, 0, SAMPLE_INTERVAL_MS, TimeUnit.MILLISECONDS);
-        HISTORY_SAVER.scheduleAtFixedRate(PanelEstadisticas::flushDirtyHistories, 15, 15, TimeUnit.SECONDS);
+        HISTORY_SAVER.scheduleAtFixedRate(PanelEstadisticas::flushDirtyHistories, HISTORY_FLUSH_INTERVAL_SECONDS, HISTORY_FLUSH_INTERVAL_SECONDS, TimeUnit.SECONDS);
     }
 
     private final GestorServidores gestorServidores;
@@ -150,7 +147,7 @@ public class PanelEstadisticas extends JPanel {
     private boolean updatingTimelineControls = false;
     private int timelineMaxOffsetSeconds = 0;
     private boolean persistedStatsPersistenceEnabled = true;
-    private int persistedStatsRecentWindowSeconds = 30 * 24 * 60 * 60;
+    private int persistedStatsRecentWindowSeconds = Server.VENTANA_RECIENTE_POR_DEFECTO_SEGUNDOS;
     private int persistedStatsHistoricalResolutionSeconds = 60;
     private final EnumMap<StatsChartOption, Boolean> pendingChartEnabled = new EnumMap<>(StatsChartOption.class);
     private final EnumMap<StatsChartOption, Boolean> pendingChartPersistenceEnabled = new EnumMap<>(StatsChartOption.class);
@@ -453,7 +450,7 @@ public class PanelEstadisticas extends JPanel {
         content.add(Box.createVerticalStrut(8));
         content.add(crearFilaSlider("Ventana reciente", ventanaRecienteSlider, ventanaRecienteValueLabel));
         content.add(Box.createVerticalStrut(8));
-        content.add(crearFilaSlider("Resolucion historica", resolucionHistoricaSlider, resolucionHistoricaValueLabel));
+        content.add(crearFilaSlider("Resolución histórica", resolucionHistoricaSlider, resolucionHistoricaValueLabel));
 
         content.add(Box.createVerticalStrut(12));
         content.add(crearTablaConfiguracionGraficas());
@@ -1206,9 +1203,13 @@ public class PanelEstadisticas extends JPanel {
         return nearestIndex;
     }
 
-    private String formatRecentWindowValue(int seconds) {
-        int months = Math.max(1, seconds / (30 * 24 * 60 * 60));
-        return months + (months == 1 ? " mes" : " meses");
+    static String formatRecentWindowValue(int seconds) {
+        int hours = Math.max(1, seconds / 3600);
+        if (hours < 24 || hours % 24 != 0) {
+            return hours + " h";
+        }
+        int days = hours / 24;
+        return days + (days == 1 ? " día" : " días");
     }
 
     private String formatHistoricalResolutionValue(int seconds) {
@@ -1253,10 +1254,14 @@ public class PanelEstadisticas extends JPanel {
     }
 
     private static int getStatsRecentWindowSeconds(Server server) {
-        if (server == null || server.getEstadisticasVentanaRecienteSegundos() == null || server.getEstadisticasVentanaRecienteSegundos() <= 0) {
-            return 30 * 24 * 60 * 60;
+        return normalizarVentanaReciente(server == null ? null : server.getEstadisticasVentanaRecienteSegundos());
+    }
+
+    static int normalizarVentanaReciente(Integer seconds) {
+        if (seconds == null || seconds <= 0 || seconds > Server.VENTANA_RECIENTE_MAXIMA_SEGUNDOS) {
+            return Server.VENTANA_RECIENTE_POR_DEFECTO_SEGUNDOS;
         }
-        return server.getEstadisticasVentanaRecienteSegundos();
+        return seconds;
     }
 
     private int getStatsHistoricalResolutionSeconds() {
@@ -2998,6 +3003,18 @@ public class PanelEstadisticas extends JPanel {
         private final LinkedHashSet<String> connectedPlayers = new LinkedHashSet<>();
         private int processedRawLogCount = 0;
 
+        synchronized void compactAll(int recentWindowSeconds, int bucketSeconds) {
+            int before = cpuSamples.size() + ramSamples.size() + diskSamples.size() + playerSamples.size();
+            compactOldSamples(cpuSamples, cpuArchive, recentWindowSeconds, bucketSeconds);
+            compactOldSamples(ramSamples, ramArchive, recentWindowSeconds, bucketSeconds);
+            compactOldSamples(diskSamples, diskArchive, recentWindowSeconds, bucketSeconds);
+            compactOldSamples(playerSamples, playerArchive, recentWindowSeconds, bucketSeconds);
+            int after = cpuSamples.size() + ramSamples.size() + diskSamples.size() + playerSamples.size();
+            if (after != before) {
+                dirty = true;
+            }
+        }
+
         private synchronized void addCpuSample(long value, long timestampMillis, int recentWindowSeconds, int bucketSeconds) {
             addSample(cpuSamples, value, timestampMillis);
             lastCpuPercent = value;
@@ -3428,7 +3445,10 @@ public class PanelEstadisticas extends JPanel {
         }
         try {
             PersistedStatsHistory model = HISTORY_MAPPER.readValue(historyFile.toFile(), PersistedStatsHistory.class);
-            return StatsHistory.fromPersistedModel(model);
+            StatsHistory history = StatsHistory.fromPersistedModel(model);
+            // Historiales antiguos podían guardar semanas a 1 s: se agregan ya al cargar.
+            history.compactAll(getStatsRecentWindowSeconds(server), getStatsHistoricalResolutionSeconds(server));
+            return history;
         } catch (Exception e) {
             System.err.println("No se ha podido cargar el historial de estadísticas de " + serverKey + ": " + e.getMessage());
             return new StatsHistory();
@@ -3456,7 +3476,14 @@ public class PanelEstadisticas extends JPanel {
             Path historyFile = getHistoryFile(persistedServer, serverKey);
             Files.createDirectories(historyFile.getParent());
             PersistedStatsHistory model = history.toPersistedModel();
-            HISTORY_MAPPER.writerWithDefaultPrettyPrinter().writeValue(historyFile.toFile(), model);
+            // JSON compacto y escritura atómica: un cierre a mitad no deja el historial corrupto.
+            Path tmp = historyFile.resolveSibling(historyFile.getFileName() + ".tmp");
+            HISTORY_MAPPER.writeValue(tmp.toFile(), model);
+            try {
+                Files.move(tmp, historyFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ex) {
+                Files.move(tmp, historyFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
             history.dirty = false;
         } catch (Exception e) {
             System.err.println("No se ha podido guardar el historial de estadísticas de " + serverKey + ": " + e.getMessage());

@@ -58,8 +58,10 @@ Common patterns:
 
 Remove long-lived listeners when components become undisplayable.
 
+Prefer `GestorServidores` property change events (`estadoServidor`, `configuracionServidor`) over polling timers. When a timer is still needed as a fallback, keep it slow (seconds), make it cheap (compare a modification time or the current text before doing work) and avoid reading files on the EDT.
+
 ## Text And Localization
 
-User-facing text is mostly Spanish. Keep new strings Spanish unless adding internal diagnostics or comments.
+User-facing text is mostly Spanish. Keep new strings Spanish unless adding internal diagnostics or comments. Standard Swing dialog texts come from `vista.TextosSwingEspanol`.
 
 Preserve accents where the file already uses UTF-8 correctly. Some older text may appear mojibaked; avoid broad encoding churn unless explicitly fixing that file.

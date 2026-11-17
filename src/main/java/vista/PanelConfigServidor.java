@@ -104,6 +104,10 @@ public class PanelConfigServidor extends JPanel {
         saveButton.setText(tr("panel.config.save", "Guardar"));
         applyDefaultSaveButtonStyle();
         section.getHeaderActionsPanel().add(recargar);
+        JLabel avisoReinicio = new JLabel("Los cambios se aplican al reiniciar el servidor.");
+        avisoReinicio.setForeground(AppTheme.getMutedForeground());
+        avisoReinicio.setFont(avisoReinicio.getFont().deriveFont(Font.PLAIN, Math.max(11f, avisoReinicio.getFont().getSize2D() - 1f)));
+        section.getActionsPanel().add(avisoReinicio);
         section.getActionsPanel().add(saveButton);
 
         formPanel = new JPanel();
@@ -458,7 +462,13 @@ public class PanelConfigServidor extends JPanel {
         } else if(comp instanceof JComboBox<?> combo){
             combo.setSelectedItem(safeValue);
         } else if(comp instanceof JSpinner spinner){
-            spinner.setValue(parseIntegerValue(safeValue));
+            int nuevo = parseIntegerValue(safeValue);
+            if(spinner.getModel() instanceof SpinnerNumberModel m){
+                Comparable<?> min = m.getMinimum(); Comparable<?> max = m.getMaximum();
+                if(min instanceof Integer mi) nuevo = Math.max(mi, nuevo);
+                if(max instanceof Integer ma) nuevo = Math.min(ma, nuevo);
+            }
+            spinner.setValue(nuevo);
         } else if(comp instanceof JTextArea ta){
             ta.setText(safeValue);
         } else if(comp instanceof JTextField tf){
@@ -725,10 +735,46 @@ public class PanelConfigServidor extends JPanel {
         labels.put("view-distance", "Distancia de visión");
         labels.put("simulation-distance", "Distancia de simulación");
         labels.put("white-list", "Whitelist");
-        labels.put("online-mode", "Online mode");
         labels.put("enable-rcon", "RCON");
         labels.put("enable-query", "Query");
         labels.put("resource-pack", "Resource pack");
+        labels.put("difficulty", "Dificultad");
+        labels.put("gamemode", "Modo de juego");
+        labels.put("force-gamemode", "Forzar modo de juego");
+        labels.put("hardcore", "Modo extremo (hardcore)");
+        labels.put("pvp", "PvP");
+        labels.put("allow-flight", "Permitir vuelo");
+        labels.put("allow-nether", "Permitir Nether");
+        labels.put("spawn-protection", "Protección del spawn");
+        labels.put("max-world-size", "Tamaño máximo del mundo");
+        labels.put("generate-structures", "Generar estructuras");
+        labels.put("generator-settings", "Ajustes del generador");
+        labels.put("enable-command-block", "Bloques de comandos");
+        labels.put("enforce-whitelist", "Forzar whitelist");
+        labels.put("player-idle-timeout", "Expulsar inactivos (minutos)");
+        labels.put("op-permission-level", "Nivel de permisos de OP");
+        labels.put("function-permission-level", "Nivel de permisos de funciones");
+        labels.put("hide-online-players", "Ocultar jugadores conectados");
+        labels.put("enable-status", "Mostrar estado en la lista de servidores");
+        labels.put("require-resource-pack", "Exigir resource pack");
+        labels.put("network-compression-threshold", "Umbral de compresión de red");
+        labels.put("sync-chunk-writes", "Escritura síncrona de chunks");
+        labels.put("enforce-secure-profile", "Exigir perfil seguro");
+        labels.put("log-ips", "Registrar IPs");
+        labels.put("broadcast-console-to-ops", "Mostrar consola a los OP");
+        labels.put("broadcast-rcon-to-ops", "Mostrar RCON a los OP");
+        labels.put("entity-broadcast-range-percentage", "Distancia de envío de entidades (%)");
+        labels.put("max-chained-neighbor-updates", "Máx. actualizaciones encadenadas");
+        labels.put("max-tick-time", "Tiempo máximo por tick (ms)");
+        labels.put("rate-limit", "Límite de paquetes");
+        labels.put("region-file-compression", "Compresión de regiones");
+        labels.put("initial-enabled-packs", "Packs activados al inicio");
+        labels.put("initial-disabled-packs", "Packs desactivados al inicio");
+        labels.put("accepts-transfers", "Aceptar transferencias");
+        labels.put("query.port", "Puerto de Query");
+        labels.put("rcon.port", "Puerto de RCON");
+        labels.put("rcon.password", "Contraseña de RCON");
+        labels.put("online-mode", "Modo online (cuentas premium)");
         return labels;
     }
 
@@ -921,6 +967,7 @@ public class PanelConfigServidor extends JPanel {
     private JSpinner createRamSpinner(int value){
         FlatSpinner spinner = new FlatSpinner();
         spinner.setModel(new SpinnerNumberModel(normalizeRamValue(value), RAM_MIN_MB, RAM_MAX_MB, RAM_STEP_MB));
+        spinner.setEditor(new JSpinner.NumberEditor(spinner, "#"));
         spinner.setRoundRect(true);
         return spinner;
     }
@@ -996,6 +1043,7 @@ public class PanelConfigServidor extends JPanel {
         if("difficulty".equalsIgnoreCase(key)){
             FlatComboBox<String> combo = new FlatComboBox<>();
             combo.setModel(new DefaultComboBoxModel<>(DIFFICULTY_OPTIONS));
+            combo.setRenderer(new EtiquetaValorRenderer());
             combo.setRoundRect(true);
             combo.setSelectedItem(normalizeDifficulty(value));
             attachDirtyTracking(combo);
@@ -1007,6 +1055,7 @@ public class PanelConfigServidor extends JPanel {
         if("gamemode".equalsIgnoreCase(key)){
             FlatComboBox<String> combo = new FlatComboBox<>();
             combo.setModel(new DefaultComboBoxModel<>(GAMEMODE_OPTIONS));
+            combo.setRenderer(new EtiquetaValorRenderer());
             combo.setRoundRect(true);
             combo.setSelectedItem(normalizeGamemode(value));
             attachDirtyTracking(combo);
@@ -1048,7 +1097,8 @@ public class PanelConfigServidor extends JPanel {
         if(detectFieldKind(key, value) == FieldKind.NUMBER){
             int numericValue = parseIntegerValue(value);
             FlatSpinner spinner = new FlatSpinner();
-            spinner.setModel(new SpinnerNumberModel(numericValue, Integer.MIN_VALUE, Integer.MAX_VALUE, 1));
+            spinner.setModel(crearModeloNumerico(key, numericValue));
+            spinner.setEditor(new JSpinner.NumberEditor(spinner, "#"));
             spinner.setRoundRect(true);
             attachDirtyTracking(spinner);
             editors.put(key, spinner);
@@ -1120,8 +1170,46 @@ public class PanelConfigServidor extends JPanel {
         }
     }
 
+    // Puertos entre 1 y 65535, contadores sin negativos; el resto admite cualquier entero (p. ej. -1).
+    static SpinnerNumberModel crearModeloNumerico(String key, int valor){
+        String k = key == null ? "" : key.toLowerCase(Locale.ROOT);
+        if(k.endsWith("port")){
+            return new SpinnerNumberModel(Math.max(1, Math.min(65535, valor)), 1, 65535, 1);
+        }
+        if(k.equals("max-players") || k.equals("spawn-protection") || k.equals("view-distance")
+                || k.equals("simulation-distance") || k.equals("player-idle-timeout") || k.equals("max-world-size")){
+            return new SpinnerNumberModel(Math.max(0, valor), 0, Integer.MAX_VALUE, 1);
+        }
+        return new SpinnerNumberModel(valor, Integer.MIN_VALUE, Integer.MAX_VALUE, 1);
+    }
+
+    // Valores de server.properties que se guardan en inglés pero se muestran en español.
+    static String etiquetaValor(String valor){
+        if(valor == null) return "";
+        return switch (valor.toLowerCase(Locale.ROOT)) {
+            case "peaceful" -> "Pacífico";
+            case "easy" -> "Fácil";
+            case "normal" -> "Normal";
+            case "hard" -> "Difícil";
+            case "survival" -> "Supervivencia";
+            case "creative" -> "Creativo";
+            case "adventure" -> "Aventura";
+            case "spectator" -> "Espectador";
+            default -> valor;
+        };
+    }
+
+    private static final class EtiquetaValorRenderer extends DefaultListCellRenderer {
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+            return super.getListCellRendererComponent(list, etiquetaValor(value == null ? null : value.toString()), index, isSelected, cellHasFocus);
+        }
+    }
+
     private String formatLabel(String key){
         if(key == null || key.isBlank()) return "Propiedad";
+        String traducida = FIELD_LABELS.get(key.toLowerCase(Locale.ROOT));
+        if(traducida != null) return tr("field." + key.toLowerCase(Locale.ROOT) + ".label", traducida);
         if("motd".equalsIgnoreCase(key)) return "MOTD";
         if("server-ip".equalsIgnoreCase(key)) return "IP del servidor";
         if("server-port".equalsIgnoreCase(key)) return "Puerto del servidor";

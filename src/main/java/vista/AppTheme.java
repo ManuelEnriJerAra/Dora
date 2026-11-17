@@ -330,9 +330,36 @@ public final class AppTheme {
         });
     }
 
+    // Texto oscuro para botones de color claro (verde, amarillo).
+    static final Color DARK_TEXT_ON_COLOR = new Color(27, 38, 30);
+
+    /**
+     * Blanco si se lee bien sobre el fondo (contraste 3:1, suficiente para texto grande en negrita);
+     * si no, un texto casi negro. El blanco sobre el verde de Iniciar daba 1,35:1.
+     */
+    public static Color getReadableForegroundOn(Color background) {
+        if (background == null) return Color.WHITE;
+        return contrastRatio(background, Color.WHITE) >= 3.0 ? Color.WHITE : DARK_TEXT_ON_COLOR;
+    }
+
+    static double contrastRatio(Color a, Color b) {
+        double la = relativeLuminance(a);
+        double lb = relativeLuminance(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    }
+
+    private static double relativeLuminance(Color c) {
+        return 0.2126 * channel(c.getRed()) + 0.7152 * channel(c.getGreen()) + 0.0722 * channel(c.getBlue());
+    }
+
+    private static double channel(int value) {
+        double v = value / 255.0;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    }
+
     public static void applyLargeControlButtonStyle(AbstractButton button, Icon icon) {
         if (button == null) return;
-        button.setForeground(Color.WHITE);
+        button.setForeground(getReadableForegroundOn(button.getBackground()));
         button.setHorizontalAlignment(SwingConstants.CENTER);
         button.setHorizontalTextPosition(SwingConstants.RIGHT);
         button.setVerticalTextPosition(SwingConstants.CENTER);

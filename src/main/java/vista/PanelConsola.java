@@ -16,8 +16,10 @@ import javax.swing.text.StyledDocument;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -34,9 +36,19 @@ public class PanelConsola extends JPanel {
     private static final Color COLOR_ERROR = AppTheme.getConsoleErrorForeground();
 
     private final int MAX_LINEAS = 5000;
-    private static final int MAX_LINEAS_POR_DRENAJE = 250;
+    private static final int MAX_LINEAS_POR_DRENAJE = 500;
+    private static final int MAX_HISTORIAL_COMANDOS = 100;
+    // Margen en píxeles para considerar que el usuario está al final de la consola.
+    private static final int MARGEN_AUTOSCROLL_PX = 24;
 
-    private final JTextPane consolaPane = new JTextPane();
+    // Siempre ajusta al ancho visible: una sola palabra larga (una ruta, por ejemplo) hacía que
+    // el JTextPane dejase de partir líneas y todo el log se cortaba por la derecha.
+    private final JTextPane consolaPane = new JTextPane() {
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+    };
     private JTextPane comandoPane = new JTextPane();
     private final StyledDocument documento = consolaPane.getStyledDocument();
 
@@ -49,6 +61,8 @@ public class PanelConsola extends JPanel {
     private final Set<String> jugadoresConectados = new LinkedHashSet<>();
     private boolean drenajeConsolaProgramado;
     private int lineasRenderizadas;
+    private final HistorialComandos historialComandos = new HistorialComandos(MAX_HISTORIAL_COMANDOS);
+    private JScrollBar barraVertical;
 
     private final GestorServidores gestorServidores;
     private final FlatCheckBox vistaSimpleCheckbox = new FlatCheckBox();
@@ -63,6 +77,10 @@ public class PanelConsola extends JPanel {
         this.gestorServidores = gestorServidores;
         this.setMinimumSize(new Dimension(this.getWidth(), 200));
         consolaPane.setEditable(false);
+        // El desplazamiento lo controla appendLineas: solo se baja al final si el usuario ya estaba ahí.
+        if (consolaPane.getCaret() instanceof javax.swing.text.DefaultCaret caret) {
+            caret.setUpdatePolicy(javax.swing.text.DefaultCaret.NEVER_UPDATE);
+        }
         this.setBorder(BorderFactory.createEmptyBorder());
         refreshThemeRefs();
 
@@ -76,12 +94,15 @@ public class PanelConsola extends JPanel {
         scroll.setViewportView(consolaPane);
         scroll.setBorder(null);
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER);
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
         scroll.setWheelScrollingEnabled(true);
         scroll.getViewport().setOpaque(true);
         scroll.getViewport().setBackground(AppTheme.getConsoleBackground());
+        barraVertical = scroll.getVerticalScrollBar();
+        barraVertical.setUnitIncrement(16);
 
-        vistaSimpleCheckbox.setText("Vista Simple");
+        vistaSimpleCheckbox.setText("Vista simple");
+        vistaSimpleCheckbox.setToolTipText("Muestra solo arranques, jugadores, chat y errores");
         vistaSimpleCheckbox.setSelected(GestorConfiguracion.isConsolaVistaSimple());
         vistaSimpleCheckbox.addActionListener(e -> {
             GestorConfiguracion.guardarConsolaVistaSimple(vistaSimpleCheckbox.isSelected());
@@ -113,26 +134,7 @@ public class PanelConsola extends JPanel {
         overlayBadge.setOpaque(false);
         overlayBadge.add(vistaSimpleCheckbox, BorderLayout.CENTER);
 
-        JPanel overlayHeader = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 8));
-        overlayHeader.setOpaque(false);
-        overlayHeader.add(overlayBadge);
-
-        JLayeredPane layeredConsole = new JLayeredPane(){
-            @Override
-            public void doLayout(){
-                int w = getWidth();
-                int h = getHeight();
-                scrollWrap.setBounds(0, 0, w, h);
-
-                Dimension pref = overlayHeader.getPreferredSize();
-                int x = Math.max(0, w - pref.width);
-                overlayHeader.setBounds(x, 0, pref.width, pref.height);
-            }
-        };
-        layeredConsole.setOpaque(false);
-        layeredConsole.add(scrollWrap, JLayeredPane.DEFAULT_LAYER);
-        layeredConsole.add(overlayHeader, JLayeredPane.PALETTE_LAYER);
-        this.add(layeredConsole, BorderLayout.CENTER);
+        this.add(scrollWrap, BorderLayout.CENTER);
 
         JPanel panelComandos = new JPanel(new BorderLayout(8, 0));
         panelComandos.setBackground(AppTheme.getConsoleBackground());
@@ -147,6 +149,8 @@ public class PanelConsola extends JPanel {
         comandoPane.setBorder(null);
         panelComandos.add(pico, BorderLayout.WEST);
         panelComandos.add(comandoPane, BorderLayout.CENTER);
+        // La opción de vista va junto a la línea de comandos para no tapar el texto del log.
+        panelComandos.add(overlayBadge, BorderLayout.EAST);
         // Interacción con la línea de comandos
         comandoPane.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("ENTER"), "enviarComando");
         comandoPane.getActionMap().put("enviarComando", new AbstractAction() {
@@ -156,7 +160,26 @@ public class PanelConsola extends JPanel {
                 if(comando.isBlank()) return;
                 Server server = gestorServidores.getServidorSeleccionado();
                 gestorServidores.mandarComando(server, comando);
+                historialComandos.registrar(comando);
                 comandoPane.setText("");
+                irAlFinal();
+            }
+        });
+        // Flechas arriba/abajo: recorrer los comandos enviados, como en una terminal.
+        comandoPane.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("UP"), "comandoAnterior");
+        comandoPane.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("DOWN"), "comandoSiguiente");
+        comandoPane.getActionMap().put("comandoAnterior", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String anterior = historialComandos.anterior(comandoPane.getText());
+                if(anterior != null) comandoPane.setText(anterior);
+            }
+        });
+        comandoPane.getActionMap().put("comandoSiguiente", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String siguiente = historialComandos.siguiente();
+                if(siguiente != null) comandoPane.setText(siguiente);
             }
         });
         comandoWrap = new RoundedBackgroundPanel(AppTheme.getConsoleBackground(), arc);
@@ -230,19 +253,19 @@ public class PanelConsola extends JPanel {
 
     private void drenarLineasPendientes() {
         int procesadas = 0;
+        List<RenderLine> lote = new ArrayList<>();
         try {
             while(procesadas < MAX_LINEAS_POR_DRENAJE) {
                 String raw;
                 synchronized (pendingLineas) {
                     raw = pendingLineas.pollFirst();
-                    if(raw == null) {
-                        drenajeConsolaProgramado = false;
-                        return;
-                    }
                 }
-                procesarLineaEnEdt(raw);
+                if(raw == null) break;
+                RenderLine linea = procesarLineaEnEdt(raw);
+                if(linea != null) lote.add(linea);
                 procesadas++;
             }
+            appendLineas(lote);
         } catch (RuntimeException ex) {
             AppErrorReporter.report("No se ha podido pintar una línea de consola.", ex);
         }
@@ -255,7 +278,7 @@ public class PanelConsola extends JPanel {
         }
     }
 
-    private void procesarLineaEnEdt(String raw) {
+    private RenderLine procesarLineaEnEdt(String raw) {
         rawLineas.addLast(raw);
         while(rawLineas.size()>MAX_LINEAS){
             rawLineas.removeFirst();
@@ -265,9 +288,8 @@ public class PanelConsola extends JPanel {
         RenderLine renderLine = render(raw, vistaSimple);
         actualizarJugadoresConectados(raw);
 
-        if(vistaSimple && renderLine.texto==null) return;
-
-        appendStyledLine(renderLine.texto, renderLine.estilo);
+        if(renderLine.texto == null || renderLine.texto.isEmpty()) return null;
+        return renderLine;
     }
 
     private void reconstruirDocumentoCompleto(){
@@ -279,42 +301,78 @@ public class PanelConsola extends JPanel {
         boolean vistaSimple = vistaSimpleCheckbox.isSelected();
         jugadoresConectados.clear();
         lineasRenderizadas = 0;
+        List<RenderLine> lote = new ArrayList<>(rawLineas.size());
         for(String raw : rawLineas){
             RenderLine renderLine = render(raw, vistaSimple);
             actualizarJugadoresConectados(raw);
-
-            if(vistaSimple && renderLine.texto==null) continue;
-
-            appendStyledLine(renderLine.texto, renderLine.estilo);
+            if(renderLine.texto == null || renderLine.texto.isEmpty()) continue;
+            lote.add(renderLine);
         }
+        appendLineas(lote);
+        irAlFinal();
     }
 
-    private void appendStyledLine(String texto, Style estilo){
-        if (texto.isEmpty()) return;
+    // Inserta un lote de líneas con una inserción por tramo del mismo estilo y un solo desplazamiento.
+    // Insertar línea a línea y mover el cursor en cada una hacía que la consola se quedase atrás.
+    private void appendLineas(List<RenderLine> lote){
+        if (lote == null || lote.isEmpty()) return;
+        boolean estabaAlFinal = estaAlFinal();
         try{
-            documento.insertString(documento.getLength(), texto + "\n", estilo);
+            StringBuilder tramo = new StringBuilder();
+            Style estiloTramo = null;
+            for (RenderLine linea : lote) {
+                if (estiloTramo != null && linea.estilo != estiloTramo) {
+                    documento.insertString(documento.getLength(), tramo.toString(), estiloTramo);
+                    tramo.setLength(0);
+                }
+                estiloTramo = linea.estilo;
+                tramo.append(linea.texto).append('\n');
+            }
+            if (!tramo.isEmpty()) {
+                documento.insertString(documento.getLength(), tramo.toString(), estiloTramo);
+            }
         } catch (BadLocationException e) {
             throw new RuntimeException(e);
         }
-        lineasRenderizadas++;
+        lineasRenderizadas += lote.size();
         recortarLineasRenderizadas();
-        consolaPane.setCaretPosition(documento.getLength());
+        if (estabaAlFinal) {
+            irAlFinal();
+        }
+    }
+
+    private boolean estaAlFinal(){
+        if (barraVertical == null || !barraVertical.isShowing()) return true;
+        return debeSeguirAlFinal(barraVertical.getValue(), barraVertical.getVisibleAmount(), barraVertical.getMaximum());
+    }
+
+    static boolean debeSeguirAlFinal(int valor, int visible, int maximo){
+        return valor + visible >= maximo - MARGEN_AUTOSCROLL_PX;
+    }
+
+    private void irAlFinal(){
+        // Tras insertar, el tamaño del documento se recalcula en el siguiente layout.
+        SwingUtilities.invokeLater(() -> {
+            if (barraVertical != null) {
+                barraVertical.setValue(barraVertical.getMaximum());
+            }
+        });
     }
 
     private void recortarLineasRenderizadas() {
-        while(lineasRenderizadas > MAX_LINEAS) {
-            try {
-                Element root = documento.getDefaultRootElement();
-                if(root.getElementCount() == 0) {
-                    lineasRenderizadas = 0;
-                    return;
-                }
-                Element first = root.getElement(0);
-                documento.remove(0, first.getEndOffset());
-                lineasRenderizadas--;
-            } catch (BadLocationException e) {
-                throw new RuntimeException(e);
+        if(lineasRenderizadas <= MAX_LINEAS) return;
+        try {
+            Element root = documento.getDefaultRootElement();
+            int sobrantes = Math.min(lineasRenderizadas - MAX_LINEAS, root.getElementCount() - 1);
+            if(sobrantes <= 0) {
+                return;
             }
+            // Un solo remove para todas las líneas sobrantes.
+            int fin = root.getElement(sobrantes - 1).getEndOffset();
+            documento.remove(0, fin);
+            lineasRenderizadas -= sobrantes;
+        } catch (BadLocationException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -362,8 +420,8 @@ public class PanelConsola extends JPanel {
         }
 
         // Chat
-        Matcher mChat = CHAT.matcher(linea);
-        if(mChat.find()){
+        Matcher mChat = linea.indexOf('<') >= 0 ? CHAT.matcher(linea) : null;
+        if(mChat != null && mChat.find()){
             String user = mChat.group(1);
             if(user != null) user = user.trim();
             if(user == null || user.isBlank() || !jugadoresConectados.contains(user)) return null;
@@ -374,12 +432,14 @@ public class PanelConsola extends JPanel {
         }
 
         // Join / Leave
-        Matcher mJoin = JOIN.matcher(linea);
-        if(mJoin.find()){
+        // contains() descarta casi todas las líneas sin pasar por la expresión regular, que es lenta
+        // porque prueba cada posición de la línea.
+        Matcher mJoin = linea.contains(" joined the game") ? JOIN.matcher(linea) : null;
+        if(mJoin != null && mJoin.find()){
             return(hora+"[INFO] "+mJoin.group(1)+" ha entrado.");
         }
-        Matcher mLeft = LEFT.matcher(linea);
-        if(mLeft.find()){
+        Matcher mLeft = linea.contains(" left the game") ? LEFT.matcher(linea) : null;
+        if(mLeft != null && mLeft.find()){
             return (hora+"[INFO] "+mLeft.group(1)+" ha salido.");
         }
         return null;
@@ -388,8 +448,8 @@ public class PanelConsola extends JPanel {
     private void actualizarJugadoresConectados(String linea){
         if(linea == null || linea.isBlank()) return;
 
-        Matcher mJoin = JOIN.matcher(linea);
-        if(mJoin.find()){
+        Matcher mJoin = linea.contains(" joined the game") ? JOIN.matcher(linea) : null;
+        if(mJoin != null && mJoin.find()){
             String nombre = mJoin.group(1);
             if(nombre != null){
                 nombre = nombre.trim();
@@ -400,8 +460,8 @@ public class PanelConsola extends JPanel {
             return;
         }
 
-        Matcher mLeft = LEFT.matcher(linea);
-        if(mLeft.find()){
+        Matcher mLeft = linea.contains(" left the game") ? LEFT.matcher(linea) : null;
+        if(mLeft != null && mLeft.find()){
             String nombre = mLeft.group(1);
             if(nombre != null){
                 nombre = nombre.trim();
@@ -427,5 +487,44 @@ public class PanelConsola extends JPanel {
             return "["+mHora.group(1)+"] ";
         }
         return null;
+    }
+
+    // Historial de comandos enviados, navegable con las flechas como en una terminal.
+    static final class HistorialComandos {
+        private final int maximo;
+        private final List<String> comandos = new ArrayList<>();
+        private int posicion = 0;
+        private String borrador = "";
+
+        HistorialComandos(int maximo) {
+            this.maximo = Math.max(1, maximo);
+        }
+
+        void registrar(String comando) {
+            if (comando == null || comando.isBlank()) return;
+            if (comandos.isEmpty() || !comandos.get(comandos.size() - 1).equals(comando)) {
+                comandos.add(comando);
+                if (comandos.size() > maximo) {
+                    comandos.remove(0);
+                }
+            }
+            posicion = comandos.size();
+            borrador = "";
+        }
+
+        String anterior(String textoActual) {
+            if (comandos.isEmpty() || posicion == 0) return null;
+            if (posicion == comandos.size()) {
+                borrador = textoActual == null ? "" : textoActual;
+            }
+            posicion--;
+            return comandos.get(posicion);
+        }
+
+        String siguiente() {
+            if (posicion >= comandos.size()) return null;
+            posicion++;
+            return posicion == comandos.size() ? borrador : comandos.get(posicion);
+        }
     }
 }

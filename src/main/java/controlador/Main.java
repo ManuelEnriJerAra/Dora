@@ -41,6 +41,7 @@ public class Main {
         UIManager.put("TitlePane.borderColor", AppTheme.getTransparentColor());
         UIManager.put("TitlePane.embeddedForeground", AppTheme.getForeground());
         UIManager.put("TitlePane.unifiedBackground", false);
+        vista.TextosSwingEspanol.aplicar();
         aplicarPreferenciasTooltips();
     }
 

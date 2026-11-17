@@ -53,8 +53,11 @@ final class MetadatosServidor {
             server.setEstadisticasPersistenciaActiva(Boolean.TRUE);
             cambios = true;
         }
-        if (server.getEstadisticasVentanaRecienteSegundos() == null || server.getEstadisticasVentanaRecienteSegundos() <= 0) {
-            server.setEstadisticasVentanaRecienteSegundos(30 * 24 * 60 * 60);
+        if (server.getEstadisticasVentanaRecienteSegundos() == null
+                || server.getEstadisticasVentanaRecienteSegundos() <= 0
+                || server.getEstadisticasVentanaRecienteSegundos() > Server.VENTANA_RECIENTE_MAXIMA_SEGUNDOS) {
+            // Las versiones anteriores guardaban meses a 1 s; se reduce a la ventana por defecto.
+            server.setEstadisticasVentanaRecienteSegundos(Server.VENTANA_RECIENTE_POR_DEFECTO_SEGUNDOS);
             cambios = true;
         }
         if (server.getEstadisticasResolucionHistoricaSegundos() == null || server.getEstadisticasResolucionHistoricaSegundos() <= 0) {

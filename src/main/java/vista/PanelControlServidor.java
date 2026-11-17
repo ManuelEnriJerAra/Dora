@@ -25,8 +25,10 @@ import java.io.IOException;
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRootPane;
+import javax.swing.Timer;
 import javax.swing.RepaintManager;
 import javax.swing.SwingUtilities;
 
@@ -39,6 +41,8 @@ import modelo.Server;
 
 public class PanelControlServidor extends JPanel {
     private static final int DEFAULT_SIDE_PX_X = 146;
+    // Tiempo de espera tras pedir la parada antes de ofrecer el cierre forzado.
+    static final long FORCE_STOP_DELAY_MS = 10_000L;
     private final PropertyChangeListener listenerEstadoServidor;
     private JPanel panelBotones;
     private JButton btnIniciarServidor;
@@ -46,6 +50,9 @@ public class PanelControlServidor extends JPanel {
     private JButton btnReiniciarServidor;
     private FlatButton btnForzarCierreServidor;
     private JPanel panelBotonesIniciado;
+    private JPanel panelBotonesDeteniendo;
+    private FlatButton btnDeteniendo;
+    private final Timer temporizadorParada;
 
     PanelControlServidor(GestorServidores gestorServidores) {
         Color colorVerde = AppTheme.getSuccessColor();
@@ -74,10 +81,16 @@ public class PanelControlServidor extends JPanel {
         btnReiniciarServidor.setBackground(colorAmarillo);
         btnReiniciarServidor.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btnForzarCierreServidor = new FlatButton();
-        btnForzarCierreServidor.setText("Forzar Cierre Servidor");
-        btnForzarCierreServidor.setOutline(true);
+        btnForzarCierreServidor.setText("Forzar cierre");
+        btnForzarCierreServidor.putClientProperty("fullText", "Forzar cierre");
         btnForzarCierreServidor.setBackground(AppTheme.getDestructiveColor());
         btnForzarCierreServidor.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        btnDeteniendo = new FlatButton();
+        btnDeteniendo.setText(textoParada("Deteniendo...", 0));
+        btnDeteniendo.setBackground(colorRojo);
+        btnDeteniendo.setFocusable(false);
+        btnDeteniendo.setRolloverEnabled(false);
+        btnDeteniendo.setToolTipText("Guardando el mundo y cerrando el servidor");
 
         FlatSVGIcon iconPlay = new FlatSVGIcon("doraicons/play.svg", 32, 32);
         FlatSVGIcon iconPause = new FlatSVGIcon("doraicons/stop.svg", 32, 32);
@@ -86,6 +99,11 @@ public class PanelControlServidor extends JPanel {
         configurarBotonAccion(btnIniciarServidor, iconPlay);
         configurarBotonAccion(btnPararServidor, iconPause);
         configurarBotonAccion(btnReiniciarServidor, iconReset);
+        java.awt.Font fuenteBase = btnDeteniendo.getFont();
+        AppTheme.applyLargeControlButtonStyle(btnDeteniendo, null);
+        btnDeteniendo.setFont(fuenteBase.deriveFont(java.awt.Font.BOLD, fuenteBase.getSize2D() + 3f));
+        AppTheme.applyLargeControlButtonStyle(btnForzarCierreServidor, null);
+        btnForzarCierreServidor.setFont(fuenteBase.deriveFont(java.awt.Font.BOLD, fuenteBase.getSize2D() + 1f));
 
         panelBotonesIniciado = new JPanel(new GridBagLayout());
         panelBotonesIniciado.setOpaque(false);
@@ -101,6 +119,24 @@ public class PanelControlServidor extends JPanel {
         gbc.gridy = 1;
         gbc.weighty = 1.0;
         panelBotonesIniciado.add(btnReiniciarServidor, gbc);
+
+        panelBotonesDeteniendo = new JPanel(new GridBagLayout());
+        panelBotonesDeteniendo.setOpaque(false);
+        GridBagConstraints gbcParada = new GridBagConstraints();
+        gbcParada.gridx = 0;
+        gbcParada.fill = GridBagConstraints.BOTH;
+        gbcParada.weightx = 1.0;
+        gbcParada.gridy = 0;
+        gbcParada.weighty = 3.0;
+        panelBotonesDeteniendo.add(btnDeteniendo, gbcParada);
+        gbcParada.gridy = 1;
+        gbcParada.weighty = 1.0;
+        gbcParada.insets = new Insets(6, 0, 0, 0);
+        panelBotonesDeteniendo.add(btnForzarCierreServidor, gbcParada);
+
+        // Mientras se detiene, refresca el texto con los segundos y habilita el cierre forzado tras la espera.
+        temporizadorParada = new Timer(1000, e -> actualizarEstadoParada(server));
+        temporizadorParada.setRepeats(true);
 
         btnIniciarServidor.addActionListener((ActionEvent e) -> {
             try {
@@ -120,7 +156,25 @@ public class PanelControlServidor extends JPanel {
             gestorServidores.safePararServidor(server);
         });
         btnForzarCierreServidor.addActionListener((ActionEvent e) -> {
-            gestorServidores.forzarPararServidor(server);
+            String nombre = server == null || server.getDisplayName() == null ? "el servidor" : "'" + server.getDisplayName() + "'";
+            int opcion = JOptionPane.showConfirmDialog(
+                    SwingUtilities.getWindowAncestor(this),
+                    "El servidor " + nombre + " no ha terminado de cerrarse.\n"
+                            + "Forzar el cierre puede corromper el mundo o perder los últimos cambios.\n\n"
+                            + "¿Quieres forzar el cierre?",
+                    "Forzar cierre",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE
+            );
+            if (opcion != JOptionPane.YES_OPTION) {
+                return;
+            }
+            btnForzarCierreServidor.setEnabled(false);
+            server.setRestartPending(false);
+            // El cierre forzado espera a que muera el árbol de procesos: nunca en el EDT.
+            Thread hilo = new Thread(() -> gestorServidores.forzarPararServidor(server), "force-stop-" + server.getId());
+            hilo.setDaemon(true);
+            hilo.start();
         });
 
         this.listenerEstadoServidor = evt -> {
@@ -155,6 +209,7 @@ public class PanelControlServidor extends JPanel {
             if((e.getChangeFlags() & HierarchyEvent.DISPLAYABILITY_CHANGED) == 0) return;
             if(!isDisplayable()){
                 gestorServidores.removePropertyChangeListener("estadoServidor", listenerEstadoServidor);
+                temporizadorParada.stop();
             }
         });
 
@@ -163,12 +218,21 @@ public class PanelControlServidor extends JPanel {
 
     private void actualizarBotonesSegunEstado(Server server){
         panelBotones.removeAll();
-        if(server.getServerProcess() != null && server.getServerProcess().isAlive()){
+        boolean vivo = server.getServerProcess() != null && server.getServerProcess().isAlive();
+        if(vivo && Boolean.TRUE.equals(server.getDeteniendo())){
+            // se ha pedido la parada y el servidor sigue guardando
+            panelBotones.add(panelBotonesDeteniendo, BorderLayout.CENTER);
+            actualizarEstadoParada(server);
+            if(!temporizadorParada.isRunning()) temporizadorParada.start();
+        }
+        else if(vivo){
             // el servidor está vivo
+            temporizadorParada.stop();
             panelBotones.add(panelBotonesIniciado, BorderLayout.CENTER);
         }
         else{
             // el servidor no está vivo
+            temporizadorParada.stop();
             panelBotones.add(btnIniciarServidor, BorderLayout.CENTER);
         }
         panelBotones.revalidate();
@@ -183,6 +247,7 @@ public class PanelControlServidor extends JPanel {
             ellipsizeButtonText(btnIniciarServidor);
             ellipsizeButtonText(btnPararServidor);
             ellipsizeButtonText(btnReiniciarServidor);
+            ellipsizeButtonText(btnForzarCierreServidor);
 
             JRootPane root = SwingUtilities.getRootPane(PanelControlServidor.this);
             if(root != null){
@@ -191,6 +256,37 @@ public class PanelControlServidor extends JPanel {
                 root.repaint();
             }
         });
+    }
+
+    private void actualizarEstadoParada(Server server){
+        if(server == null || !Boolean.TRUE.equals(server.getDeteniendo())){
+            temporizadorParada.stop();
+            return;
+        }
+        long transcurrido = Math.max(0L, System.currentTimeMillis() - server.getParadaSolicitadaMillis());
+        long segundos = transcurrido / 1000L;
+        String base = Boolean.TRUE.equals(server.getRestartPending()) ? "Reiniciando..." : "Deteniendo...";
+        btnDeteniendo.setText(textoParada(base, segundos));
+        boolean puedeForzar = permiteForzarCierre(transcurrido);
+        if(btnForzarCierreServidor.isVisible() != puedeForzar){
+            btnForzarCierreServidor.setVisible(puedeForzar);
+            panelBotonesDeteniendo.revalidate();
+            SwingUtilities.invokeLater(() -> ellipsizeButtonText(btnForzarCierreServidor));
+        }
+        if(puedeForzar && !btnForzarCierreServidor.isEnabled() && server.getServerProcess() != null){
+            // se vuelve a habilitar si un intento anterior no consiguió cerrarlo
+            btnForzarCierreServidor.setEnabled(true);
+        }
+    }
+
+    // Dos líneas para que quepa en el ancho fijo del panel: el estado y los segundos transcurridos.
+    static String textoParada(String base, long segundos){
+        String detalle = segundos < 2 ? "Guardando mundo" : segundos + " s";
+        return "<html><center>" + base + "<br><span style='font-size:90%;font-weight:normal'>" + detalle + "</span></center></html>";
+    }
+
+    static boolean permiteForzarCierre(long msDesdeParada){
+        return msDesdeParada >= FORCE_STOP_DELAY_MS;
     }
 
     private void ellipsizeButtonText(AbstractButton button){
@@ -225,7 +321,8 @@ public Dimension getMaximumSize() {
             return;
         }
         AppTheme.applyLargeControlButtonStyle(button, flatIcon);
-        flatIcon.setColorFilter(new FlatSVGIcon.ColorFilter(color -> Color.WHITE));
+        Color colorIcono = button.getForeground();
+        flatIcon.setColorFilter(new FlatSVGIcon.ColorFilter(color -> colorIcono));
     }
 
 }
