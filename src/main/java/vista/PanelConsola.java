@@ -61,6 +61,10 @@ public class PanelConsola extends JPanel {
     private final Set<String> jugadoresConectados = new LinkedHashSet<>();
     private boolean drenajeConsolaProgramado;
     private int lineasRenderizadas;
+    // Mientras la consola no se ve (otra página de la ventana), las líneas nuevas se guardan aquí en vez de
+    // insertarse en el documento: maquetar un JTextPane oculto con miles de líneas congelaba las demás páginas.
+    private final Deque<RenderLine> lineasEnPausa = new ArrayDeque<>();
+    private boolean reconstruirAlMostrar;
     private final HistorialComandos historialComandos = new HistorialComandos(MAX_HISTORIAL_COMANDOS);
     private JScrollBar barraVertical;
 
@@ -135,6 +139,7 @@ public class PanelConsola extends JPanel {
         overlayBadge.add(vistaSimpleCheckbox, BorderLayout.CENTER);
 
         this.add(scrollWrap, BorderLayout.CENTER);
+        PausaSiOculto.instalar(this, this::volcarLineasEnPausa, null);
 
         JPanel panelComandos = new JPanel(new BorderLayout(8, 0));
         panelComandos.setBackground(AppTheme.getConsoleBackground());
@@ -234,6 +239,8 @@ public class PanelConsola extends JPanel {
         rawLineas.clear();
         rawLineas.addAll(server.getRawLogLines());
         jugadoresConectados.clear();
+        lineasEnPausa.clear();
+        reconstruirAlMostrar = false;
 
         reconstruirDocumentoCompleto();
     }
@@ -265,7 +272,11 @@ public class PanelConsola extends JPanel {
                 if(linea != null) lote.add(linea);
                 procesadas++;
             }
-            appendLineas(lote);
+            if (isShowing()) {
+                appendLineas(lote);
+            } else {
+                guardarLineasEnPausa(lote);
+            }
         } catch (RuntimeException ex) {
             AppErrorReporter.report("No se ha podido pintar una línea de consola.", ex);
         }
@@ -276,6 +287,42 @@ public class PanelConsola extends JPanel {
                 SwingUtilities.invokeLater(this::drenarLineasPendientes);
             }
         }
+    }
+
+    private void guardarLineasEnPausa(List<RenderLine> lote) {
+        if (reconstruirAlMostrar) {
+            // Ya se va a reconstruir desde rawLineas, que siempre está al día.
+            return;
+        }
+        lineasEnPausa.addAll(lote);
+        if (lineasEnPausa.size() > MAX_LINEAS) {
+            // Han llegado más líneas de las que caben: al volver se rehace el documento entero una vez.
+            lineasEnPausa.clear();
+            reconstruirAlMostrar = true;
+        }
+    }
+
+    private void volcarLineasEnPausa() {
+        if (reconstruirAlMostrar) {
+            reconstruirAlMostrar = false;
+            lineasEnPausa.clear();
+            reconstruirDocumentoCompleto();
+            return;
+        }
+        if (lineasEnPausa.isEmpty()) {
+            return;
+        }
+        List<RenderLine> lote = new ArrayList<>(lineasEnPausa);
+        lineasEnPausa.clear();
+        appendLineas(lote);
+    }
+
+    int getLineasEnPausaParaTests() {
+        return lineasEnPausa.size();
+    }
+
+    boolean isReconstruccionPendienteParaTests() {
+        return reconstruirAlMostrar;
     }
 
     private RenderLine procesarLineaEnEdt(String raw) {
@@ -293,6 +340,7 @@ public class PanelConsola extends JPanel {
     }
 
     private void reconstruirDocumentoCompleto(){
+        lineasEnPausa.clear();
         try{
             documento.remove(0, documento.getLength());
         } catch (BadLocationException e) {
