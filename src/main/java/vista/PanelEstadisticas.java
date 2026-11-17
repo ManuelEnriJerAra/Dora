@@ -225,9 +225,8 @@ public class PanelEstadisticas extends JPanel {
             }
             SwingUtilities.invokeLater(this::solicitarMuestras);
         };
-        iniciarRecursosSiHaceFalta();
+        PausaSiOculto.instalar(this, this::alMostrarPagina, this::detenerRecursos);
         refrescarGraficasDesdeHistorial();
-        SwingUtilities.invokeLater(this::solicitarMuestras);
     }
 
     private JPanel crearContenido() {
@@ -806,8 +805,21 @@ public class PanelEstadisticas extends JPanel {
     @Override
     public void addNotify() {
         super.addNotify();
+        // En la ventana principal la página puede montarse oculta (CardLayout): el temporizador solo
+        // corre mientras se ve. PausaSiOculto lo arranca y lo para al cambiar de página.
+        if (isShowing()) {
+            iniciarRecursosSiHaceFalta();
+            SwingUtilities.invokeLater(this::solicitarMuestras);
+        }
+    }
+
+    private void alMostrarPagina() {
         iniciarRecursosSiHaceFalta();
         SwingUtilities.invokeLater(this::solicitarMuestras);
+    }
+
+    boolean isRefrescoActivoParaTests() {
+        return refreshTimer != null && refreshTimer.isRunning();
     }
 
     @Override
