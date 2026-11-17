@@ -33,6 +33,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.EnumMap;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +54,8 @@ import tools.jackson.databind.ObjectMapper;
 @SuppressWarnings("unused")
 public class PanelEstadisticas extends JPanel {
     private static final int SAMPLE_INTERVAL_MS = 1000;
+    // Puntos como mucho por gráfica: más que píxeles útiles no se ven y hacen lento dibujar y pasar el ratón.
+    static final int MAX_CHART_POINTS = 720;
     private static final int CHART_LEFT_PADDING = 52;
     private static final int CHART_RIGHT_PADDING = 92;
     private static final int CHART_TOP_PADDING = 28;
@@ -78,6 +81,12 @@ public class PanelEstadisticas extends JPanel {
             12 * 60 * 60,
             24 * 60 * 60
     };
+    private static final DateTimeFormatter GRID_SECOND_FORMAT =
+            DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter GRID_MINUTE_FORMAT =
+            DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter GRID_DAY_FORMAT =
+            DateTimeFormatter.ofPattern("dd/MM").withZone(ZoneId.systemDefault());
     private static final DateTimeFormatter SAMPLE_TIME_FORMAT =
             DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss").withZone(ZoneId.systemDefault());
     private static final Map<String, StatsHistory> HISTORY_BY_SERVER = new ConcurrentHashMap<>();
@@ -1505,16 +1514,23 @@ public class PanelEstadisticas extends JPanel {
         TimeRangeOption selectedRange = getSelectedRange();
         int bucketSeconds = getStatsHistoricalResolutionSeconds();
         actualizarNavegacionHistorico(selectedRange.seconds(), bucketSeconds);
-        int offsetSeconds = getTimelineOffsetSeconds();
-        cpuChart.setSamples(statsHistory.snapshotForRangeCpu(selectedRange.seconds(), offsetSeconds, bucketSeconds));
-        ramChart.setSamples(statsHistory.snapshotForRange(selectedRange.seconds(), offsetSeconds, bucketSeconds));
-        diskChart.setSamples(statsHistory.snapshotForRangeDisk(selectedRange.seconds(), offsetSeconds, bucketSeconds));
-        playersChart.setSamples(statsHistory.snapshotForRangePlayers(selectedRange.seconds(), offsetSeconds, bucketSeconds));
-        cpuChart.setRangeSeconds(selectedRange.seconds());
-        ramChart.setRangeSeconds(selectedRange.seconds());
-        diskChart.setRangeSeconds(selectedRange.seconds());
-        playersChart.setRangeSeconds(selectedRange.seconds());
+        int rangeSeconds = selectedRange.seconds();
+        long windowEndMillis = statsHistory.getWindowEndTimestamp(getTimelineOffsetSeconds());
+        boolean ventanaEnVivo = esVentanaEnVivo(windowEndMillis);
+        cpuChart.setSamples(statsHistory.snapshotForRangeCpu(rangeSeconds, windowEndMillis));
+        ramChart.setSamples(statsHistory.snapshotForRange(rangeSeconds, windowEndMillis));
+        diskChart.setSamples(statsHistory.snapshotForRangeDisk(rangeSeconds, windowEndMillis));
+        playersChart.setSamples(statsHistory.snapshotForRangePlayers(rangeSeconds, windowEndMillis));
+        cpuChart.setWindow(rangeSeconds, windowEndMillis, ventanaEnVivo);
+        ramChart.setWindow(rangeSeconds, windowEndMillis, ventanaEnVivo);
+        diskChart.setWindow(rangeSeconds, windowEndMillis, ventanaEnVivo);
+        playersChart.setWindow(rangeSeconds, windowEndMillis, ventanaEnVivo);
         rebuildChartsPanel();
+    }
+
+    /** La ventana llega hasta ahora (no se ha desplazado hacia atrás y el servidor sigue tomando muestras). */
+    static boolean esVentanaEnVivo(long windowEndMillis) {
+        return windowEndMillis > 0L && System.currentTimeMillis() - windowEndMillis <= 5_000L;
     }
 
     private TimeRangeOption getSelectedRange() {
@@ -1527,20 +1543,20 @@ public class PanelEstadisticas extends JPanel {
     }
 
     private void actualizarNavegacionHistorico(int rangeSeconds, int bucketSeconds) {
-        int maxOffsetSeconds = statsHistory.getMaxOffsetSeconds(rangeSeconds, bucketSeconds);
+        int maxOffsetSeconds = statsHistory.getMaxOffsetSeconds(rangeSeconds);
         int currentOffset = Math.max(0, Math.min(getTimelineOffsetSeconds(), maxOffsetSeconds));
         timelineMaxOffsetSeconds = maxOffsetSeconds;
         updatingTimelineControls = true;
         historialScrollBar.setEnabled(maxOffsetSeconds > 0);
         historialScrollBar.setValues(maxOffsetSeconds - currentOffset, 1, 0, maxOffsetSeconds + 1);
-        historialScrollBar.setBlockIncrement(Math.max(10, rangeSeconds / 12));
-        historialScrollBar.setUnitIncrement(1);
+        historialScrollBar.setBlockIncrement(Math.max(1, rangeSeconds / 12));
+        historialScrollBar.setUnitIncrement(Math.max(1, rangeSeconds / 60));
         updatingTimelineControls = false;
         posicionHistoricoLabel.setText(buildTimelineWindowLabel(currentOffset, bucketSeconds));
     }
 
     private String buildTimelineWindowLabel(int offsetSeconds, int bucketSeconds) {
-        long endTimestamp = statsHistory.getWindowEndTimestamp(offsetSeconds, bucketSeconds);
+        long endTimestamp = statsHistory.getWindowEndTimestamp(offsetSeconds);
         if (endTimestamp <= 0L) {
             return "Sin histórico";
         }
@@ -2906,7 +2922,11 @@ public class PanelEstadisticas extends JPanel {
         MINUTES_5("5 min", 300),
         MINUTES_10("10 min", 600),
         MINUTES_30("30 min", 1800),
-        HOUR_1("1 h", 3600);
+        HOUR_1("1 h", 3600),
+        HOURS_6("6 h", 6 * 3600),
+        HOURS_24("24 h", 24 * 3600),
+        DAYS_7("7 días", 7 * 24 * 3600),
+        DAYS_30("30 días", 30 * 24 * 3600);
 
         private final String label;
         private final int seconds;
@@ -2947,16 +2967,16 @@ public class PanelEstadisticas extends JPanel {
         }
     }
 
-    private record ChartSample(long value, long timestampMillis, Boolean shutdownMarker) {
+    record ChartSample(long value, long timestampMillis, Boolean shutdownMarker) {
         private ChartSample(long value, long timestampMillis) {
             this(value, timestampMillis, false);
         }
 
-        private ChartSample {
+        ChartSample {
             shutdownMarker = Boolean.TRUE.equals(shutdownMarker);
         }
 
-        private boolean isShutdownMarker() {
+        boolean isShutdownMarker() {
             return Boolean.TRUE.equals(shutdownMarker);
         }
     }
@@ -2997,7 +3017,7 @@ public class PanelEstadisticas extends JPanel {
         public boolean active;
     }
 
-    private static final class StatsHistory {
+    static final class StatsHistory {
         private final Deque<ChartSample> cpuSamples = new ArrayDeque<>();
         private final Deque<ChartSample> ramSamples = new ArrayDeque<>();
         private final Deque<ChartSample> diskSamples = new ArrayDeque<>();
@@ -3027,7 +3047,7 @@ public class PanelEstadisticas extends JPanel {
             }
         }
 
-        private synchronized void addCpuSample(long value, long timestampMillis, int recentWindowSeconds, int bucketSeconds) {
+        synchronized void addCpuSample(long value, long timestampMillis, int recentWindowSeconds, int bucketSeconds) {
             addSample(cpuSamples, value, timestampMillis);
             lastCpuPercent = value;
             compactOldSamples(cpuSamples, cpuArchive, recentWindowSeconds, bucketSeconds);
@@ -3054,20 +3074,20 @@ public class PanelEstadisticas extends JPanel {
             dirty = true;
         }
 
-        private synchronized List<ChartSample> snapshotForRangeCpu(int seconds, int offsetSeconds, int bucketSeconds) {
-            return buildSnapshot(cpuSamples, cpuArchive, seconds, offsetSeconds, bucketSeconds);
+        synchronized List<ChartSample> snapshotForRangeCpu(int seconds, long windowEndMillis) {
+            return buildWindowSnapshot(cpuSamples, cpuArchive, seconds, windowEndMillis);
         }
 
-        private synchronized List<ChartSample> snapshotForRange(int seconds, int offsetSeconds, int bucketSeconds) {
-            return buildSnapshot(ramSamples, ramArchive, seconds, offsetSeconds, bucketSeconds);
+        private synchronized List<ChartSample> snapshotForRange(int seconds, long windowEndMillis) {
+            return buildWindowSnapshot(ramSamples, ramArchive, seconds, windowEndMillis);
         }
 
-        private synchronized List<ChartSample> snapshotForRangeDisk(int seconds, int offsetSeconds, int bucketSeconds) {
-            return buildSnapshot(diskSamples, diskArchive, seconds, offsetSeconds, bucketSeconds);
+        private synchronized List<ChartSample> snapshotForRangeDisk(int seconds, long windowEndMillis) {
+            return buildWindowSnapshot(diskSamples, diskArchive, seconds, windowEndMillis);
         }
 
-        private synchronized List<ChartSample> snapshotForRangePlayers(int seconds, int offsetSeconds, int bucketSeconds) {
-            return buildSnapshot(playerSamples, playerArchive, seconds, offsetSeconds, bucketSeconds);
+        private synchronized List<ChartSample> snapshotForRangePlayers(int seconds, long windowEndMillis) {
+            return buildWindowSnapshot(playerSamples, playerArchive, seconds, windowEndMillis);
         }
 
         private synchronized List<ChartSample> snapshotTimelineCpu(int bucketSeconds) {
@@ -3106,7 +3126,7 @@ public class PanelEstadisticas extends JPanel {
             return active;
         }
 
-        private synchronized void addShutdownSamples(long timestampMillis, int recentWindowSeconds, int bucketSeconds) {
+        synchronized void addShutdownSamples(long timestampMillis, int recentWindowSeconds, int bucketSeconds) {
             addSample(cpuSamples, 0L, timestampMillis, true);
             addSample(ramSamples, 0L, timestampMillis, true);
             addSample(diskSamples, 0L, timestampMillis, true);
@@ -3185,33 +3205,73 @@ public class PanelEstadisticas extends JPanel {
             dirty = true;
         }
 
-        private List<ChartSample> buildSnapshot(Deque<ChartSample> recentSamples,
-                                                TreeMap<Long, AggregateSample> archiveSamples,
-                                                int seconds,
-                                                int offsetSeconds,
-                                                int bucketSeconds) {
-            int rangeSeconds = Math.max(1, seconds);
-            List<ChartSample> timeline = buildTimelineSamples(recentSamples, archiveSamples, bucketSeconds);
-            List<ChartSample> snapshot = new ArrayList<>(rangeSeconds);
-            for (int i = 0; i < rangeSeconds; i++) {
+        /**
+         * Agrupa las muestras de la ventana (windowEnd - seconds, windowEnd] en como mucho {@link #MAX_CHART_POINTS}
+         * puntos repartidos por tiempo. Solo recorre las muestras de la ventana, no todo el histórico.
+         */
+        private List<ChartSample> buildWindowSnapshot(Deque<ChartSample> recentSamples,
+                                                      TreeMap<Long, AggregateSample> archiveSamples,
+                                                      int seconds,
+                                                      long windowEndMillis) {
+            int points = chartPointsFor(seconds);
+            List<ChartSample> snapshot = new ArrayList<>(points);
+            for (int i = 0; i < points; i++) {
                 snapshot.add(null);
             }
-
-            if (timeline.isEmpty()) {
+            if (windowEndMillis <= 0L) {
                 return snapshot;
             }
+            long rangeMillis = Math.max(1, seconds) * 1000L;
+            long startMillis = windowEndMillis - rangeMillis;
+            double pointMillis = rangeMillis / (double) points;
+            long[] sums = new long[points];
+            long[] counts = new long[points];
+            long[] lastTimestamps = new long[points];
+            ChartSample[] markers = new ChartSample[points];
 
-            int safeOffset = Math.max(0, offsetSeconds);
-            int endIndexExclusive = Math.max(0, timeline.size() - safeOffset);
-            int startIndex = Math.max(0, endIndexExclusive - rangeSeconds);
-            int copyStart = Math.max(0, rangeSeconds - (endIndexExclusive - startIndex));
-            for (int timelineIndex = startIndex; timelineIndex < endIndexExclusive; timelineIndex++) {
-                int snapshotIndex = copyStart + (timelineIndex - startIndex);
-                if (snapshotIndex >= 0 && snapshotIndex < snapshot.size()) {
-                    snapshot.set(snapshotIndex, timeline.get(timelineIndex));
+            for (AggregateSample aggregate : archiveSamples.subMap(startMillis, false, windowEndMillis, true).values()) {
+                if (aggregate == null || aggregate.count <= 0L) {
+                    continue;
+                }
+                int index = pointIndex(aggregate.bucketStartMillis, startMillis, pointMillis, points);
+                sums[index] += aggregate.sum;
+                counts[index] += aggregate.count;
+                lastTimestamps[index] = Math.max(lastTimestamps[index], aggregate.bucketStartMillis);
+            }
+            Iterator<ChartSample> recientes = recentSamples.descendingIterator();
+            while (recientes.hasNext()) {
+                ChartSample sample = recientes.next();
+                if (sample == null) {
+                    continue;
+                }
+                long timestamp = sample.timestampMillis();
+                if (timestamp > windowEndMillis) {
+                    continue;
+                }
+                if (timestamp <= startMillis) {
+                    break;
+                }
+                int index = pointIndex(timestamp, startMillis, pointMillis, points);
+                sums[index] += sample.value();
+                counts[index]++;
+                lastTimestamps[index] = Math.max(lastTimestamps[index], timestamp);
+                if (sample.isShutdownMarker() && markers[index] == null) {
+                    markers[index] = sample;
+                }
+            }
+            for (int i = 0; i < points; i++) {
+                if (markers[i] != null) {
+                    snapshot.set(i, markers[i]);
+                } else if (counts[i] > 0L) {
+                    snapshot.set(i, new ChartSample(Math.round(sums[i] / (double) counts[i]), lastTimestamps[i], false));
                 }
             }
             return snapshot;
+        }
+
+        private static int pointIndex(long timestamp, long startMillis, double pointMillis, int points) {
+            int index = (int) ((timestamp - startMillis - 1L) / pointMillis);
+            return Math.max(0, Math.min(points - 1, index));
         }
 
         private List<ChartSample> buildTimelineSamples(Deque<ChartSample> recentSamples,
@@ -3250,30 +3310,50 @@ public class PanelEstadisticas extends JPanel {
             }
         }
 
-        private synchronized int getMaxOffsetSeconds(int rangeSeconds, int bucketSeconds) {
-            int totalSamples = Math.max(snapshotTimelineCpu(bucketSeconds).size(),
-                    Math.max(snapshotTimelineRam(bucketSeconds).size(),
-                            Math.max(snapshotTimelineDisk(bucketSeconds).size(),
-                                    snapshotTimelinePlayers(bucketSeconds).size())));
-            return Math.max(0, totalSamples - Math.max(1, rangeSeconds));
+        synchronized int getMaxOffsetSeconds(int rangeSeconds) {
+            long earliest = Long.MAX_VALUE;
+            long latest = latestTimestamp();
+            for (Deque<ChartSample> recent : List.of(cpuSamples, ramSamples, diskSamples, playerSamples)) {
+                ChartSample first = recent.peekFirst();
+                if (first != null) {
+                    earliest = Math.min(earliest, first.timestampMillis());
+                }
+            }
+            for (TreeMap<Long, AggregateSample> archive : List.of(cpuArchive, ramArchive, diskArchive, playerArchive)) {
+                if (!archive.isEmpty()) {
+                    earliest = Math.min(earliest, archive.firstKey());
+                }
+            }
+            if (latest <= 0L || earliest == Long.MAX_VALUE) {
+                return 0;
+            }
+            long spanSeconds = Math.max(0L, (latest - earliest) / 1000L);
+            return (int) Math.max(0L, Math.min(Integer.MAX_VALUE - 1L, spanSeconds - Math.max(1, rangeSeconds)));
         }
 
-        private synchronized long getWindowEndTimestamp(int offsetSeconds, int bucketSeconds) {
-            List<ChartSample> timeline = snapshotTimelineRam(bucketSeconds);
-            if (snapshotTimelineCpu(bucketSeconds).size() > timeline.size()) {
-                timeline = snapshotTimelineCpu(bucketSeconds);
-            }
-            if (snapshotTimelineDisk(bucketSeconds).size() > timeline.size()) {
-                timeline = snapshotTimelineDisk(bucketSeconds);
-            }
-            if (snapshotTimelinePlayers(bucketSeconds).size() > timeline.size()) {
-                timeline = snapshotTimelinePlayers(bucketSeconds);
-            }
-            if (timeline.isEmpty()) {
+        /** Fin de la ventana: la última muestra menos el desplazamiento, o 0 si no hay histórico. */
+        synchronized long getWindowEndTimestamp(int offsetSeconds) {
+            long latest = latestTimestamp();
+            if (latest <= 0L) {
                 return 0L;
             }
-            int safeOffset = Math.max(0, Math.min(offsetSeconds, timeline.size() - 1));
-            return timeline.get(timeline.size() - 1 - safeOffset).timestampMillis();
+            return latest - Math.max(0, offsetSeconds) * 1000L;
+        }
+
+        private long latestTimestamp() {
+            long latest = 0L;
+            for (Deque<ChartSample> recent : List.of(cpuSamples, ramSamples, diskSamples, playerSamples)) {
+                ChartSample last = recent.peekLast();
+                if (last != null) {
+                    latest = Math.max(latest, last.timestampMillis());
+                }
+            }
+            for (TreeMap<Long, AggregateSample> archive : List.of(cpuArchive, ramArchive, diskArchive, playerArchive)) {
+                if (!archive.isEmpty()) {
+                    latest = Math.max(latest, archive.lastKey());
+                }
+            }
+            return latest;
         }
 
         private synchronized PersistedStatsHistory toPersistedModel() {
@@ -3680,6 +3760,8 @@ public class PanelEstadisticas extends JPanel {
         private final String emptyMessage;
         private long maxValue = 1L;
         private int rangeSeconds = 60;
+        private long windowEndMillis = 0L;
+        private boolean liveWindow = true;
         private int hoveredSampleIndex = -1;
         private Long hoveredTimestampMillis = null;
         private String lastTooltipText;
@@ -3718,8 +3800,10 @@ public class PanelEstadisticas extends JPanel {
             repaint();
         }
 
-        private void setRangeSeconds(int rangeSeconds) {
+        private void setWindow(int rangeSeconds, long windowEndMillis, boolean liveWindow) {
             this.rangeSeconds = Math.max(1, rangeSeconds);
+            this.windowEndMillis = windowEndMillis;
+            this.liveWindow = liveWindow;
             repaint();
         }
 
@@ -3854,7 +3938,7 @@ public class PanelEstadisticas extends JPanel {
                     g2.drawLine(x, y0, x, yBottom);
                 }
                 if (seconds < safeRangeSeconds) {
-                    String label = formatRangeLabel(safeRangeSeconds - seconds);
+                    String label = formatGridLabel(safeRangeSeconds - seconds, safeRangeSeconds, includeHover);
                     FontMetrics fm = g2.getFontMetrics();
                     int labelX = Math.max(x0, Math.min(x0 + chartWidth - fm.stringWidth(label), x - (fm.stringWidth(label) / 2)));
                     g2.setColor(palette.textColor());
@@ -3968,7 +4052,27 @@ public class PanelEstadisticas extends JPanel {
             }
 
             g2.setColor(palette.textColor());
-            g2.drawString("Ahora", x0 + chartWidth - 28, height - 8);
+            String endLabel = !includeHover || liveWindow || windowEndMillis <= 0L
+                    ? "Ahora"
+                    : formatClock(windowEndMillis, safeRangeSeconds);
+            g2.drawString(endLabel, x0 + chartWidth - g2.getFontMetrics().stringWidth(endLabel) / 2, height - 8);
+        }
+
+        /**
+         * Etiqueta de una línea vertical a {@code secondsBeforeEnd} del final. En vivo es relativa ("-5m");
+         * desplazada hacia atrás es la hora real, porque "-5m" ya no sería respecto a ahora.
+         */
+        private String formatGridLabel(int secondsBeforeEnd, int totalSeconds, boolean onScreen) {
+            if (!onScreen || liveWindow || windowEndMillis <= 0L) {
+                return formatRangeLabel(secondsBeforeEnd);
+            }
+            return formatClock(windowEndMillis - secondsBeforeEnd * 1000L, totalSeconds);
+        }
+
+        private String formatClock(long timestampMillis, int totalSeconds) {
+            DateTimeFormatter formatter = totalSeconds > 24 * 3600 ? GRID_DAY_FORMAT
+                    : totalSeconds > 600 ? GRID_MINUTE_FORMAT : GRID_SECOND_FORMAT;
+            return formatter.format(Instant.ofEpochMilli(timestampMillis));
         }
 
         private String formatAxisValue(long value) {
@@ -4077,12 +4181,22 @@ public class PanelEstadisticas extends JPanel {
             if (totalSeconds <= 300) return 60;
             if (totalSeconds <= 600) return 120;
             if (totalSeconds <= 1800) return 300;
-            return 600;
+            if (totalSeconds <= 3600) return 600;
+            if (totalSeconds <= 6 * 3600) return 3600;
+            if (totalSeconds <= 24 * 3600) return 4 * 3600;
+            if (totalSeconds <= 7 * 24 * 3600) return 24 * 3600;
+            return 5 * 24 * 3600;
         }
 
         private String formatRangeLabel(int seconds) {
             if (seconds < 60) {
                 return "-" + seconds + "s";
+            }
+            if (seconds >= 24 * 3600 && seconds % (24 * 3600) == 0) {
+                return "-" + (seconds / (24 * 3600)) + "d";
+            }
+            if (seconds >= 3600 && seconds % 3600 == 0) {
+                return "-" + (seconds / 3600) + "h";
             }
             int minutes = seconds / 60;
             if (seconds % 60 == 0) {
@@ -4090,6 +4204,10 @@ public class PanelEstadisticas extends JPanel {
             }
             return "-" + minutes + "m " + (seconds % 60) + "s";
         }
+    }
+
+    static int chartPointsFor(int rangeSeconds) {
+        return Math.max(1, Math.min(Math.max(1, rangeSeconds), MAX_CHART_POINTS));
     }
 
     private record HoverInfo(int index, ChartSample sample) {
