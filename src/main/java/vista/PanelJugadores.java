@@ -205,8 +205,7 @@ public class PanelJugadores extends JPanel {
             if (server == null || actualizado.getId() == null || server.getId() == null) return;
             if (!actualizado.getId().equals(server.getId())) return;
 
-            boolean vivo = actualizado.getServerProcess() != null && actualizado.getServerProcess().isAlive();
-            if (!vivo) {
+            if (!servidorConJugadores(actualizado)) {
                 SwingUtilities.invokeLater(() -> setJugadores(Set.of()));
             }
         };
@@ -359,8 +358,17 @@ public class PanelJugadores extends JPanel {
         });
     }
 
+    /** Solo un servidor en marcha que no se está deteniendo tiene jugadores conectados. */
+    static boolean servidorConJugadores(Server server) {
+        return server != null
+                && server.getServerProcess() != null
+                && server.getServerProcess().isAlive()
+                && !Boolean.TRUE.equals(server.getDeteniendo());
+    }
+
     private void recomputarDesdeLogs(List<String> rawLogLines) {
-        if (rawLogLines == null || rawLogLines.isEmpty()) {
+        // Los registros de la última sesión siguen en memoria al parar: un servidor parado no tiene jugadores.
+        if (rawLogLines == null || rawLogLines.isEmpty() || !servidorConJugadores(server)) {
             setJugadores(Set.of());
             return;
         }

@@ -104,6 +104,7 @@ public class PanelConsola extends JPanel {
         scroll.getViewport().setBackground(AppTheme.getConsoleBackground());
         barraVertical = scroll.getVerticalScrollBar();
         barraVertical.setUnitIncrement(16);
+        aplicarEstiloBarraConsola(AppTheme.getConsoleBackground());
 
         vistaSimpleCheckbox.setText("Vista simple");
         vistaSimpleCheckbox.setToolTipText("Muestra solo arranques, jugadores, chat y errores");
@@ -215,6 +216,29 @@ public class PanelConsola extends JPanel {
         if (comandoWrap != null) {
             comandoWrap.setBackground(consoleBackground);
         }
+        aplicarEstiloBarraConsola(consoleBackground);
+    }
+
+    // La barra de desplazamiento usaba los colores claros del tema y se veía como una franja blanca
+    // sobre la consola oscura.
+    private void aplicarEstiloBarraConsola(Color consoleBackground) {
+        if (barraVertical == null) return;
+        Color thumb = AppTheme.tint(consoleBackground, Color.WHITE, 0.28f);
+        Color thumbHover = AppTheme.tint(consoleBackground, Color.WHITE, 0.42f);
+        barraVertical.setBackground(consoleBackground);
+        barraVertical.putClientProperty("FlatLaf.style", "track: " + hex(consoleBackground)
+                + "; thumb: " + hex(thumb)
+                + "; hoverThumbColor: " + hex(thumbHover)
+                + "; pressedThumbColor: " + hex(thumbHover)
+                + "; hoverTrackColor: " + hex(consoleBackground)
+                + "; thumbArc: 999; thumbInsets: 1,2,1,2");
+        if (barraVertical.getParent() instanceof JScrollPane scroll) {
+            scroll.getViewport().setBackground(consoleBackground);
+        }
+    }
+
+    private static String hex(Color color) {
+        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
     }
 
     private void inicializarEstilo() {

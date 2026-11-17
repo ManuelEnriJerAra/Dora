@@ -567,11 +567,17 @@ public class PanelConfigServidor extends JPanel {
     }
 
     private JComponent crearSeccion(String title, java.util.List<String> keys, Properties props){
-        JPanel wrapper = new JPanel(new BorderLayout());
+        // Alto máximo = alto preferido: con un máximo ilimitado el BoxLayout repartía el espacio sobrante entre
+        // las secciones y dejaba un hueco enorme bajo "Acceso y red".
+        JPanel wrapper = new JPanel(new BorderLayout()) {
+            @Override
+            public Dimension getMaximumSize() {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
         wrapper.setOpaque(false);
         wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
         wrapper.setBorder(BorderFactory.createEmptyBorder());
-        wrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 
         JPanel sectionPanel = new JPanel();
         sectionPanel.setOpaque(false);

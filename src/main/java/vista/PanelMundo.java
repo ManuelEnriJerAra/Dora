@@ -3051,7 +3051,7 @@ public class PanelMundo extends JPanel {
         }
         qualitySection.add(Box.createVerticalGlue());
 
-        JPanel overlaySection = createPreviewOptionsSectionPanel("Superposicion");
+        JPanel overlaySection = createPreviewOptionsSectionPanel("Superposición");
         overlaySection.add(createPreviewCheckBoxRow(mostrarSpawnMenuItem, mostrarSpawnMenuItem.getToolTipText()));
         overlaySection.add(Box.createVerticalStrut(4));
         overlaySection.add(createPreviewCheckBoxRow(mostrarJugadoresMenuItem, mostrarJugadoresMenuItem.getToolTipText()));
