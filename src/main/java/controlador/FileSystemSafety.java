@@ -73,7 +73,33 @@ public final class FileSystemSafety {
         return path != null && Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS);
     }
 
+    /** Avance de una copia: bytes copiados hasta ahora. Puede lanzar InterruptedIOException para cancelarla. */
+    @FunctionalInterface
+    public interface CopyProgress {
+        void copied(long bytesCopied, Path currentFile) throws java.io.InterruptedIOException;
+    }
+
+    /** Bytes de los archivos normales bajo el directorio, sin seguir enlaces. 0 si no existe. */
+    public static long directorySize(Path directory) throws IOException {
+        if (!isDirectoryNoFollow(directory)) {
+            return 0L;
+        }
+        long total = 0L;
+        try (Stream<Path> walk = Files.walk(directory)) {
+            for (Path current : walk.toList()) {
+                if (isRegularFileNoFollow(current)) {
+                    total += Files.size(current);
+                }
+            }
+        }
+        return total;
+    }
+
     public static void copyDirectoryTree(Path source, Path target) throws IOException {
+        copyDirectoryTree(source, target, null);
+    }
+
+    public static void copyDirectoryTree(Path source, Path target, CopyProgress progress) throws IOException {
         if (source == null || target == null) {
             throw new IllegalArgumentException("Las rutas no pueden ser nulas.");
         }
@@ -81,6 +107,7 @@ public final class FileSystemSafety {
             throw new IllegalArgumentException("El origen no es un directorio: " + source);
         }
 
+        long copied = 0L;
         try (Stream<Path> walk = Files.walk(source)) {
             for (Path current : walk.toList()) {
                 Path relative = source.relativize(current);
@@ -92,6 +119,10 @@ public final class FileSystemSafety {
                         Files.createDirectories(destination.getParent());
                     }
                     Files.copy(current, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+                    if (progress != null) {
+                        copied += Files.size(destination);
+                        progress.copied(copied, current);
+                    }
                 }
             }
         }
