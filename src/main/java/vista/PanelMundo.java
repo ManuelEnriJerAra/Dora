@@ -33,6 +33,7 @@ import javax.swing.text.DocumentFilter;
 import javax.swing.text.NavigationFilter;
 import javax.swing.text.Position;
 import java.awt.*;
+import java.awt.geom.AffineTransform;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
@@ -152,6 +153,8 @@ public class PanelMundo extends JPanel {
     private static final int EMPTY_SPIRAL_RINGS_TO_STOP = 2;
     private static final int PREVIEW_RENDER_MARGIN_BLOCKS = MCARenderer.CHUNK_BLOCK_SIDE;
     private static boolean previewGenerationInProgress = false;
+    // Cada carga de la vista previa en segundo plano lleva un número; solo se aplica la última que se pidió.
+    private long solicitudCargaPreview = 0L;
     private static SwingWorker<PreviewGenerationResult, PreviewGenerationUpdate> previewGenerationWorker;
     private final AtomicLong previewGenerationSequence = new AtomicLong();
     private boolean previewDisponibleAntesDeGenerar = false;
@@ -2454,6 +2457,7 @@ public class PanelMundo extends JPanel {
 
     private void actualizarPreviewSeleccionada() {
         World mundo = getMundoSeleccionadoOActivo();
+        solicitudCargaPreview++;
         if (mundo == null) {
             mostrarTextoPreview("La vista previa todavía no existe.");
             return;
@@ -2474,29 +2478,81 @@ public class PanelMundo extends JPanel {
             return;
         }
 
+        // Leer y decodificar el PNG (varios MB en mundos grandes) se hace fuera del hilo de la interfaz.
+        final long solicitud = ++solicitudCargaPreview;
+        new SwingWorker<PreviewCargada, Void>() {
+            @Override
+            protected PreviewCargada doInBackground() throws IOException {
+                BufferedImage image = comoImagenRapidaDePintar(ImageIO.read(previewPath.toFile()));
+                PreviewOverlayData overlayData = image == null ? null : WorldPreviewOverlayService.loadOverlayData(mundo);
+                return new PreviewCargada(image, overlayData);
+            }
+
+            @Override
+            protected void done() {
+                if (solicitud != solicitudCargaPreview) {
+                    return; // ya se ha pedido otra vista previa
+                }
+                PreviewCargada cargada;
+                try {
+                    cargada = get();
+                } catch (Exception ex) {
+                    mostrarTextoPreview("No se ha podido leer la vista previa.");
+                    return;
+                }
+                aplicarPreviewCargada(cargada);
+            }
+        }.execute();
+    }
+
+    private record PreviewCargada(BufferedImage image, PreviewOverlayData overlayData) {
+    }
+
+    /**
+     * ImageIO devuelve los PNG como 3 bytes por píxel; Java2D lo convierte la primera vez que lo pinta, lo que
+     * con una vista previa de 6144x6144 congelaba la ventana unos 0,25 s. Se convierte aquí, en segundo plano.
+     */
+    static BufferedImage comoImagenRapidaDePintar(BufferedImage image) {
+        if (image == null) {
+            return null;
+        }
+        int tipo = image.getColorModel().hasAlpha() ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB;
+        if (image.getType() == tipo) {
+            image.setAccelerationPriority(0f);
+            return image;
+        }
+        BufferedImage convertida = new BufferedImage(image.getWidth(), image.getHeight(), tipo);
+        // Sin esto Java2D copia la imagen entera (150 MB a 6144x6144) a la tarjeta gráfica la primera vez que la pinta.
+        convertida.setAccelerationPriority(0f);
+        Graphics2D g2 = convertida.createGraphics();
         try {
-            BufferedImage image = ImageIO.read(previewPath.toFile());
-            if (image == null) {
-                mostrarTextoPreview("No se ha podido leer la vista previa.");
-                return;
-            }
-            PreviewOverlayData overlayData = WorldPreviewOverlayService.loadOverlayData(mundo);
-            previewImageLabel.setImage(image);
-            previewImageLabel.setOverlayData(overlayData);
-            previewImageLabel.setChunkGridVisible(previewPreferences.showChunkGrid());
-            previewImageLabel.setSpawnVisible(previewPreferences.showSpawn());
-            previewImageLabel.setPlayersVisible(previewPreferences.showPlayers());
-            if ((previewPreferences.showChunkGrid() || previewPreferences.showSpawn() || previewPreferences.showPlayers()) && overlayData == null) {
-                System.out.println("[PanelMundo] Overlay metadata missing for preview. Regenerate the preview once to enable local overlays.");
-                JOptionPane.showMessageDialog(
-                        this,
-                        "Esta vista previa no tiene datos de superposición.\nRegenera la vista previa una vez para poder mostrar el spawn o los límites de chunks.",
-                        "Superposiciones no disponibles",
-                        JOptionPane.INFORMATION_MESSAGE
-                );
-            }
-        } catch (IOException ex) {
+            g2.drawImage(image, 0, 0, null);
+        } finally {
+            g2.dispose();
+        }
+        return convertida;
+    }
+
+    private void aplicarPreviewCargada(PreviewCargada cargada) {
+        BufferedImage image = cargada.image();
+        if (image == null) {
             mostrarTextoPreview("No se ha podido leer la vista previa.");
+            return;
+        }
+        PreviewOverlayData overlayData = cargada.overlayData();
+        previewImageLabel.setImage(image);
+        previewImageLabel.setOverlayData(overlayData);
+        previewImageLabel.setChunkGridVisible(previewPreferences.showChunkGrid());
+        previewImageLabel.setSpawnVisible(previewPreferences.showSpawn());
+        previewImageLabel.setPlayersVisible(previewPreferences.showPlayers());
+        if ((previewPreferences.showChunkGrid() || previewPreferences.showSpawn() || previewPreferences.showPlayers()) && overlayData == null) {
+            System.out.println("[PanelMundo] Overlay metadata missing for preview. Regenerate the preview once to enable local overlays.");
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Esta vista previa no tiene datos de superposición.\nRegenera la vista previa una vez para poder mostrar el spawn o los límites de chunks.",
+                    "Superposiciones no disponibles",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
         }
     }
 
@@ -3514,6 +3570,7 @@ public class PanelMundo extends JPanel {
     }
 
     private static final class PreviewImagePanel extends JComponent {
+        private BufferedImage bufer;
         private BufferedImage image;
         private PreviewOverlayData overlayData;
         private boolean chunkGridVisible = false;
@@ -3721,12 +3778,47 @@ public class PanelMundo extends JPanel {
                 g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
                 g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
-                g2.drawImage(image, state.drawX(), state.drawY(), state.drawWidth(), state.drawHeight(), null);
+                pintarImagenEscalada(g2, state);
                 paintChunkGrid(g2, state);
                 paintSpawn(g2, state);
                 paintPlayers(g2, state);
             } finally {
                 g2.dispose();
+            }
+        }
+
+        /**
+         * Pinta la parte visible de la imagen en un búfer del tamaño del panel y luego vuelca ese búfer. Pintar
+         * la imagen original escalada directamente en pantalla hace que Java2D suba la imagen entera (150 MB a
+         * 6144x6144) a la tarjeta gráfica en cada primer pintado, lo que congelaba la ventana unos 0,2 s.
+         */
+        private void pintarImagenEscalada(Graphics2D g2, RenderState state) {
+            AffineTransform transform = g2.getTransform();
+            double escalaX = transform.getScaleX() > 0d ? transform.getScaleX() : 1d;
+            double escalaY = transform.getScaleY() > 0d ? transform.getScaleY() : 1d;
+            int anchoBufer = Math.max(1, (int) Math.ceil(getWidth() * escalaX));
+            int altoBufer = Math.max(1, (int) Math.ceil(getHeight() * escalaY));
+            if (bufer == null || bufer.getWidth() != anchoBufer || bufer.getHeight() != altoBufer) {
+                bufer = new BufferedImage(anchoBufer, altoBufer, BufferedImage.TYPE_INT_ARGB);
+            }
+            Graphics2D gb = bufer.createGraphics();
+            try {
+                gb.setComposite(AlphaComposite.Clear);
+                gb.fillRect(0, 0, anchoBufer, altoBufer);
+                gb.setComposite(AlphaComposite.SrcOver);
+                gb.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+                gb.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
+                gb.scale(escalaX, escalaY);
+                gb.drawImage(image, state.drawX(), state.drawY(), state.drawWidth(), state.drawHeight(), null);
+            } finally {
+                gb.dispose();
+            }
+            Graphics2D gp = (Graphics2D) g2.create();
+            try {
+                gp.scale(1d / escalaX, 1d / escalaY);
+                gp.drawImage(bufer, 0, 0, null);
+            } finally {
+                gp.dispose();
             }
         }
 

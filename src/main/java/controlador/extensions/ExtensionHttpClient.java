@@ -27,17 +27,32 @@ class ExtensionHttpClient {
     private static final Map<String, CacheEntry> MEMORY_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, Object> IN_FLIGHT_LOCKS = new ConcurrentHashMap<>();
 
-    private final HttpClient client;
+    // Crear un HttpClient carga TLS y cuesta unos 100 ms; se hace al primer uso para no frenar el arranque.
+    private volatile HttpClient client;
 
     ExtensionHttpClient() {
-        this(HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build());
+        this(null);
     }
 
     ExtensionHttpClient(HttpClient client) {
-        this.client = client == null ? HttpClient.newHttpClient() : client;
+        this.client = client;
+    }
+
+    private HttpClient client() {
+        HttpClient actual = client;
+        if (actual == null) {
+            synchronized (this) {
+                actual = client;
+                if (actual == null) {
+                    actual = HttpClient.newBuilder()
+                            .connectTimeout(Duration.ofSeconds(5))
+                            .followRedirects(HttpClient.Redirect.NORMAL)
+                            .build();
+                    client = actual;
+                }
+            }
+        }
+        return actual;
     }
 
     String get(URI uri, Map<String, String> headers) throws IOException {
@@ -70,7 +85,7 @@ class ExtensionHttpClient {
                                 requestBuilder.header(header.getKey(), header.getValue());
                             }
                         }
-                        HttpResponse<String> response = client.send(requestBuilder.GET().build(), HttpResponse.BodyHandlers.ofString());
+                        HttpResponse<String> response = client().send(requestBuilder.GET().build(), HttpResponse.BodyHandlers.ofString());
                         if (response.statusCode() < 200 || response.statusCode() >= 300) {
                             throw new IOException("Respuesta HTTP " + response.statusCode() + " al consultar " + uri + ".");
                         }

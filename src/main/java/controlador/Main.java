@@ -57,6 +57,7 @@ public class Main {
         if (!adquirirBloqueoInstancia()) {
             return;
         }
+        PrecargaArranque.iniciar();
 
         SwingUtilities.invokeLater(()->{
             aplicarTemaInicial();
@@ -170,7 +171,7 @@ public class Main {
     }
 
     private static void aplicarTemaInicial() {
-        DoraConfig config = GestorConfiguracion.cargarConfiguracion();
+        DoraConfig config = PrecargaArranque.configuracion();
         String temaClassName = config.getTemaClassName();
         if (temaClassName == null || temaClassName.isBlank()) {
             temaClassName = GestorConfiguracion.getTemaPorDefecto();
