@@ -123,7 +123,7 @@ final class ConversorPlataformaServidor {
                 server,
                 wizardResult.adapter(),
                 wizardResult.option(),
-                (url, destination) -> MOJANG_API.descargar(url, destination, null),
+                (url, destination) -> MOJANG_API.descargar(url, destination, DialogoTareaEnCurso.listenerDescargaActual(destination == null ? null : destination.getName())),
                 wizardResult.createBackup()
         );
         if (converted != null && wizardResult.warning().crossEcosystem()) {

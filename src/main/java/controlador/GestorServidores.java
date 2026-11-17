@@ -905,7 +905,7 @@ public class GestorServidores {
                                 true,
                                 resolverIconoPorDefecto(),
                                 MOJANG_API,
-                                (url, destination) -> MOJANG_API.descargar(url, destination, null)
+                                (url, destination) -> MOJANG_API.descargar(url, destination, DialogoTareaEnCurso.listenerDescargaActual(destination == null ? null : destination.getName()))
                         ));
                         return transientServer;
                     }
@@ -991,25 +991,44 @@ public class GestorServidores {
             }
         }
 
-        ServerPlatformProfile profile = PerfilPlataformaServidor.detectar(directorioNormalizadoPath);
-        if (profile == null) {
+        // Detectar la plataforma, la versión y las extensiones lee los jar y recorre libraries/ y mods/:
+        // en servidores con muchos mods tarda, así que se hace fuera del hilo de la interfaz.
+        Server server;
+        try {
+            server = DialogoTareaEnCurso.ejecutar(
+                    "Importar servidor",
+                    "Analizando la carpeta del servidor...",
+                    () -> analizarServidorImportado(directorioNormalizadoPath)
+            );
+        } catch (IOException e) {
+            System.out.println("No se ha podido analizar el servidor importado: " + e.getMessage());
+            return null;
+        }
+        if (server == null) {
             System.out.println("No se ha podido detectar una plataforma válida para el servidor importado.");
             return null;
         }
 
+        guardarServidor(server);
+        GestorMundos.sincronizarMundosServidor(server);
+        return server;
+    }
+
+    // Solo lee archivos y rellena el servidor; no avisa a la interfaz, así que se puede llamar desde otro hilo.
+    private Server analizarServidorImportado(Path directorio) {
+        ServerPlatformProfile profile = PerfilPlataformaServidor.detectar(directorio);
+        if (profile == null) {
+            return null;
+        }
         Server server = new Server();
-        server.setServerDir(directorioNormalizado);
+        server.setServerDir(directorio.toString());
         PerfilPlataformaServidor.aplicar(server, profile);
         if (server.getVersion() == null || server.getVersion().isBlank()) {
             server.setVersion(DetectorVersionServidor.detectarVersionVanilla(server));
         }
         server.setDisplayName(construirNombreDesdeCarpeta(server.getVersion(), server.getServerDir()));
-
-        guardarServidor(server);
-        GestorMundos.sincronizarMundosServidor(server);
         try {
             sincronizarExtensionesServidor(server);
-            guardarServidor(server);
         } catch (IOException ignored) {
         }
         return server;

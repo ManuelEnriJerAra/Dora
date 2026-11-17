@@ -1615,12 +1615,45 @@ public class PanelJugadores extends JPanel {
     }
 
     private String resolverUuidJugador(String username) {
-        String uuid = mojangAPI.obtenerUuidJugador(username);
+        // Con online-mode=false el servidor identifica a los jugadores por su UUID offline, que se calcula
+        // a partir del nombre: no hace falta preguntar a Mojang (y funciona sin conexión).
+        if (!esServidorOnlineMode(server)) {
+            return uuidOffline(username);
+        }
+        String uuid;
+        try {
+            // La consulta a Mojang puede tardar varios segundos: se hace fuera del hilo de la interfaz.
+            uuid = controlador.DialogoTareaEnCurso.ejecutarConProgreso(
+                    "Buscando jugador",
+                    "Consultando el UUID de " + username + " en Mojang...",
+                    false,
+                    300,
+                    progreso -> mojangAPI.obtenerUuidJugador(username)
+            );
+        } catch (IOException e) {
+            uuid = null;
+        }
         if (uuid != null && !uuid.isBlank()) {
             return uuid;
         }
-        mostrarErrorLista("No se ha podido resolver el UUID de '" + username + "'.");
+        mostrarErrorLista("No se ha encontrado a '" + username + "' en Mojang. Comprueba el nombre y la conexión a internet.");
         return null;
+    }
+
+    static String uuidOffline(String username) {
+        return java.util.UUID.nameUUIDFromBytes(("OfflinePlayer:" + username).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+    }
+
+    static boolean esServidorOnlineMode(Server server) {
+        try {
+            if (server == null || server.getServerDir() == null || server.getServerDir().isBlank()) return true;
+            Path path = Path.of(server.getServerDir()).resolve("server.properties");
+            if (!Files.exists(path)) return true;
+            String value = Utilidades.cargarPropertiesUtf8(path).getProperty("online-mode");
+            return value == null || !value.trim().equalsIgnoreCase("false");
+        } catch (IOException | RuntimeException e) {
+            return true;
+        }
     }
 
     private Path resolverRutaLista(TipoLista tipo) {

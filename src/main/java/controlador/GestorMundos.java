@@ -162,12 +162,15 @@ public final class GestorMundos {
         World mundoDestino = new World(getDirectorioMundo(server, nombreDestino).toString(), nombreDestino);
 
         try {
-            copiarConDimensiones(origen, getDirectorioMundo(server, mundoDestino));
+            copiarConProgreso("Importar mundo", "Copiando el mundo " + mundoDestino.getWorldName() + "...",
+                    origen, getDirectorioMundo(server, mundoDestino));
             JOptionPane.showMessageDialog(parent,
                     "Mundo importado en " + DIRECTORIO_MUNDOS + ": " + mundoDestino.getWorldName(),
                     "Importar mundo",
                     JOptionPane.INFORMATION_MESSAGE);
             return true;
+        } catch (java.io.InterruptedIOException e) {
+            return false;
         } catch (IOException e) {
             JOptionPane.showMessageDialog(parent,
                     "No se ha podido importar el mundo: " + e.getMessage(),
@@ -215,13 +218,15 @@ public final class GestorMundos {
         }
 
         try {
-            copiarConDimensiones(origen, destino);
+            copiarConProgreso("Exportar mundo", "Copiando el mundo " + mundo.getWorldName() + "...", origen, destino);
             quitarArchivosDePrevisualizacion(destino);
             JOptionPane.showMessageDialog(parent,
                     "Mundo exportado en: " + destino,
                     "Exportar mundo",
                     JOptionPane.INFORMATION_MESSAGE);
             return true;
+        } catch (java.io.InterruptedIOException e) {
+            return false;
         } catch (IOException e) {
             JOptionPane.showMessageDialog(parent,
                     "No se ha podido exportar el mundo: " + e.getMessage(),
@@ -388,9 +393,88 @@ public final class GestorMundos {
     }
 
     private static void copiarConDimensiones(Path origenBase, Path destinoBase) throws IOException {
-        Utilidades.copiarDirectorio(origenBase, destinoBase);
-        copiarSiExiste(origenBase.resolveSibling(origenBase.getFileName() + SUFIJO_NETHER), destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_NETHER));
-        copiarSiExiste(origenBase.resolveSibling(origenBase.getFileName() + SUFIJO_END), destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_END));
+        copiarConDimensiones(origenBase, destinoBase, null);
+    }
+
+    // Copia el mundo y sus dimensiones fuera del hilo de la interfaz, con barra de progreso y botón Cancelar.
+    // Si se cancela o falla, borra lo que se haya llegado a copiar.
+    private static void copiarConProgreso(String titulo, String descripcion, Path origenBase, Path destinoBase) throws IOException {
+        List<Path> destinos = destinosConDimensiones(destinoBase);
+        List<Path> yaExistian = new ArrayList<>();
+        for (Path destino : destinos) {
+            if (Files.exists(destino)) yaExistian.add(destino);
+        }
+        DialogoTareaEnCurso.ejecutarConProgreso(titulo, descripcion, true, 300, progreso -> {
+            try {
+                copiarConDimensiones(origenBase, destinoBase, progreso);
+            } catch (Exception e) {
+                // Se borra aquí, todavía en segundo plano: un mundo con miles de archivos tarda en borrarse.
+                progreso.actualizar(-1d, "Borrando la copia incompleta...");
+                borrarCopiaIncompleta(destinos, yaExistian);
+                throw e;
+            }
+            return null;
+        });
+    }
+
+    private static void borrarCopiaIncompleta(List<Path> destinos, List<Path> yaExistian) {
+        for (Path destino : destinos) {
+            if (yaExistian.contains(destino)) continue;
+            try {
+                Utilidades.eliminarDirectorio(destino);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private static List<Path> destinosConDimensiones(Path destinoBase) {
+        return List.of(
+                destinoBase,
+                destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_NETHER),
+                destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_END)
+        );
+    }
+
+    static void copiarConDimensiones(Path origenBase, Path destinoBase, DialogoTareaEnCurso.Progreso progreso) throws IOException {
+        Path origenNether = origenBase.resolveSibling(origenBase.getFileName() + SUFIJO_NETHER);
+        Path origenEnd = origenBase.resolveSibling(origenBase.getFileName() + SUFIJO_END);
+        if (progreso == null) {
+            Utilidades.copiarDirectorio(origenBase, destinoBase);
+            copiarSiExiste(origenNether, destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_NETHER));
+            copiarSiExiste(origenEnd, destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_END));
+            return;
+        }
+        progreso.actualizar(-1d, "Calculando tamaño...");
+        long total = FileSystemSafety.directorySize(origenBase)
+                + FileSystemSafety.directorySize(origenNether)
+                + FileSystemSafety.directorySize(origenEnd);
+        long[] previo = {0L};
+        FileSystemSafety.CopyProgress avance = (copiados, archivo) -> {
+            if (progreso.cancelado()) {
+                throw new java.io.InterruptedIOException("Copia cancelada.");
+            }
+            long hecho = previo[0] + copiados;
+            progreso.actualizar(total > 0 ? hecho / (double) total : -1d, textoCopia(hecho, total));
+        };
+        FileSystemSafety.copyDirectoryTree(origenBase, destinoBase, avance);
+        previo[0] = FileSystemSafety.directorySize(destinoBase);
+        if (Files.isDirectory(origenNether)) {
+            Path destino = destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_NETHER);
+            FileSystemSafety.copyDirectoryTree(origenNether, destino, avance);
+            previo[0] += FileSystemSafety.directorySize(destino);
+        }
+        if (Files.isDirectory(origenEnd)) {
+            FileSystemSafety.copyDirectoryTree(origenEnd, destinoBase.resolveSibling(destinoBase.getFileName() + SUFIJO_END), avance);
+        }
+        progreso.actualizar(1d, textoCopia(total, total));
+    }
+
+    static String textoCopia(long hecho, long total) {
+        double mbHecho = hecho / (1024d * 1024d);
+        if (total <= 0) {
+            return String.format(java.util.Locale.ROOT, "%.0f MB copiados", mbHecho);
+        }
+        return String.format(java.util.Locale.ROOT, "%.0f de %.0f MB copiados", mbHecho, total / (1024d * 1024d));
     }
 
     // Copia un directorio solo si la ruta de origen existe como carpeta.
