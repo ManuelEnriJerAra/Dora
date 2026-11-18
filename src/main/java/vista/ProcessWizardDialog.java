@@ -108,7 +108,8 @@ public final class ProcessWizardDialog {
         dialog.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                if (options.confirmCancel().getAsBoolean()) {
+                // En el primer paso todavía no se ha elegido nada: se cierra sin preguntar.
+                if (stepIndex == 0 || options.confirmCancel().getAsBoolean()) {
                     accepted = false;
                     dialog.dispose();
                 }

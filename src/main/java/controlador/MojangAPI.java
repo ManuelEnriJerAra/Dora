@@ -381,7 +381,7 @@ public class MojangAPI {
         }
     }
 
-    private BufferedImage extraerCabezaDesdeSkin(BufferedImage skin){
+    static BufferedImage extraerCabezaDesdeSkin(BufferedImage skin){
         // Formato skin clásico: cara en (8,8) 8x8; capa (sombrero) en (40,8) 8x8
         BufferedImage base = skin.getSubimage(8, 8, 8, 8);
         BufferedImage overlay = skin.getSubimage(40, 8, 8, 8);
@@ -389,9 +389,30 @@ public class MojangAPI {
         BufferedImage out = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = out.createGraphics();
         g.drawImage(base, 0, 0, null);
-        g.drawImage(overlay, 0, 0, null);
+        if (!capaSombreroOpacaEnSkinAntigua(skin)) {
+            g.drawImage(overlay, 0, 0, null);
+        }
         g.dispose();
         return out;
+    }
+
+    /**
+     * Las skins antiguas de 64x32 (como la de Notch) suelen tener la zona del sombrero rellena de un color
+     * opaco. Minecraft ignora esa capa cuando no tiene ningún píxel transparente; si no, la cabeza sale como
+     * un cuadrado negro.
+     */
+    static boolean capaSombreroOpacaEnSkinAntigua(BufferedImage skin) {
+        if (skin.getHeight() != 32 || skin.getWidth() < 64) {
+            return false;
+        }
+        for (int y = 0; y < 32; y++) {
+            for (int x = 32; x < 64; x++) {
+                if ((skin.getRGB(x, y) >>> 24) < 128) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private JsonNode readJsonFromUrl(String url) throws IOException {

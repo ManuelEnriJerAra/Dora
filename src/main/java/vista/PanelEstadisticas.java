@@ -87,6 +87,8 @@ public class PanelEstadisticas extends JPanel {
             DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault());
     private static final DateTimeFormatter GRID_DAY_FORMAT =
             DateTimeFormatter.ofPattern("dd/MM").withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter WINDOW_END_FORMAT =
+            DateTimeFormatter.ofPattern("dd/MM HH:mm:ss").withZone(ZoneId.systemDefault());
     private static final DateTimeFormatter SAMPLE_TIME_FORMAT =
             DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss").withZone(ZoneId.systemDefault());
     private static final Map<String, StatsHistory> HISTORY_BY_SERVER = new ConcurrentHashMap<>();
@@ -540,7 +542,7 @@ public class PanelEstadisticas extends JPanel {
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
 
-        JLabel titleLabel = new JLabel("Graficas");
+        JLabel titleLabel = new JLabel("Gráficas");
         titleLabel.setForeground(AppTheme.getMutedForeground());
         titleLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         panel.add(titleLabel);
@@ -1560,11 +1562,12 @@ public class PanelEstadisticas extends JPanel {
         if (endTimestamp <= 0L) {
             return "Sin histórico";
         }
-        String endText = SAMPLE_TIME_FORMAT.format(Instant.ofEpochMilli(endTimestamp));
+        // Sin el año: con él el texto no cabía junto a la barra y se cortaba ("16:37:2").
+        String endText = WINDOW_END_FORMAT.format(Instant.ofEpochMilli(endTimestamp));
         if (offsetSeconds <= 0) {
             return "Ventana actual hasta " + endText;
         }
-        return "Ventana desplazada hasta " + endText;
+        return "Desplazada hasta " + endText;
     }
 
     private void styleActionButton(JButton button) {

@@ -143,6 +143,9 @@ final class PanelExtensiones extends JPanel {
             extensionsModel.clear();
             summaryLabel.setText(unsupportedSummary());
             directoriesLabel.setText(unsupportedActionHint());
+            directoriesLabel.setToolTipText(unsupportedActionHint().startsWith("Conviértelo")
+                    ? "Convierte el servidor a Forge, Fabric, Paper u otra plataforma compatible para gestionar extensiones."
+                    : null);
             mostrarPlaceholderDetalles("Sin gestión de " + extensionPluralLower());
             refreshLayout();
             return;
@@ -152,6 +155,7 @@ final class PanelExtensiones extends JPanel {
         if (showLoadingState) {
             summaryLabel.setText("Sincronizando " + getSectionLabel().toLowerCase(Locale.ROOT) + "...");
             directoriesLabel.setText(managedDirectoryLabel() + ": " + formatDirectories(directories));
+            directoriesLabel.setToolTipText(null);
             mostrarPlaceholderDetalles("Cargando " + extensionPluralLower() + "...");
         }
         updateActionState();
@@ -795,7 +799,8 @@ final class PanelExtensiones extends JPanel {
     private String unsupportedActionHint() {
         boolean convertible = gestorServidores != null && gestorServidores.puedeConvertirseAPlataformaCompatible(server);
         if (convertible) {
-            return "Convierte el servidor a Forge, Fabric, Paper u otra plataforma compatible para gestionar extensiones.";
+            // Corto para que quepa en una línea del panel; el texto completo va en el tooltip.
+            return "Conviértelo a Forge, Fabric o Paper para gestionar extensiones.";
         }
         return "No hay carpeta de mods o plugins disponible para este servidor.";
     }
@@ -1648,6 +1653,7 @@ final class PanelExtensiones extends JPanel {
                 statusCache.putAll(result.statuses());
                 summaryLabel.setText(getSectionLabel() + " instalados: " + extensions.size());
                 directoriesLabel.setText(managedDirectoryLabel() + ": " + formatDirectories(directories));
+                directoriesLabel.setToolTipText(null);
 
                 extensionsModel.addAll(extensions);
                 ExtensionIconLoader.prefetchIcons(
