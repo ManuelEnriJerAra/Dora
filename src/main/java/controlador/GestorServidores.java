@@ -539,6 +539,32 @@ public class GestorServidores {
     }
 
     // esta función de encarga de comprobar si los servidores almacenados son correctos, si no lo son se eliminan
+    private record RevisionServidor(boolean cargable, ServerPlatformProfile perfil) {
+    }
+
+    // Detectar la plataforma lee los .jar de cada servidor: se hace una sola vez por servidor y en paralelo.
+    private Map<Server, RevisionServidor> revisarServidoresEnParalelo(List<Server> candidatos) {
+        Map<Server, RevisionServidor> revisiones = new java.util.concurrent.ConcurrentHashMap<>();
+        candidatos.parallelStream()
+                .filter(Objects::nonNull)
+                .forEach(server -> revisiones.put(server, revisarServidor(server)));
+        return revisiones;
+    }
+
+    private RevisionServidor revisarServidor(Server server) {
+        if (server.getServerDir() == null || server.getServerDir().isBlank()) return new RevisionServidor(false, null);
+        Path dir = Path.of(server.getServerDir());
+        if (!Files.isDirectory(dir)) return new RevisionServidor(false, null);
+        ServerPlatformProfile profile = null;
+        try {
+            profile = PerfilPlataformaServidor.detectar(dir);
+        } catch (RuntimeException ignored) {
+            // si no se puede detectar, se valida con la plataforma guardada
+        }
+        ServerPlatformAdapter adapter = ServerPlatformAdapters.forPlatform(profile == null ? server.getPlatform() : profile.platform());
+        return new RevisionServidor(adapter.validate(dir).valid(), profile);
+    }
+
     private void validarYLimpiarServidoresPersistidos() {
         if ((listaServidores == null || listaServidores.isEmpty()) && servidoresNoDisponibles.isEmpty()) return;
 
@@ -561,18 +587,16 @@ public class GestorServidores {
         // si han ocurrido cambios se los notificaremos al usuario
         boolean cambios = false;
 
+        Map<Server, RevisionServidor> revisiones = revisarServidoresEnParalelo(candidatos);
         for (Server server : candidatos) {
             if (server == null) continue;
+            RevisionServidor revision = revisiones.get(server);
             // si el servidor no es cargable lo apartamos en noCargables, pero NO lo borramos del JSON
-            if (esServidorCargable(server)) {
-                try {
-                    ServerPlatformProfile profile = PerfilPlataformaServidor.detectar(Path.of(server.getServerDir()));
-                    if (profile != null) {
-                        PerfilPlataformaServidor.aplicar(server, profile);
-                        cambios = true;
-                    }
-                } catch (RuntimeException ignored) {
-                    // si no se puede detectar, no bloqueamos la carga
+            if (revision != null && revision.cargable()) {
+                ServerPlatformProfile profile = revision.perfil();
+                if (profile != null) {
+                    PerfilPlataformaServidor.aplicar(server, profile);
+                    cambios = true;
                 }
                 cargables.add(server);
             } else {

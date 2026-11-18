@@ -15,17 +15,32 @@ import java.util.Locale;
 public final class ExtensionArtifactDownloader implements FileDownloader {
     private static final String USER_AGENT = "Dora/alpha (+https://github.com/ManuJara/Dora)";
 
-    private final HttpClient client;
+    // Se crea al primer uso: crear un HttpClient carga TLS y frena el arranque de la aplicación.
+    private volatile HttpClient client;
 
     public ExtensionArtifactDownloader() {
-        this(HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .followRedirects(HttpClient.Redirect.ALWAYS)
-                .build());
+        this(null);
     }
 
     ExtensionArtifactDownloader(HttpClient client) {
-        this.client = client == null ? HttpClient.newHttpClient() : client;
+        this.client = client;
+    }
+
+    private HttpClient client() {
+        HttpClient actual = client;
+        if (actual == null) {
+            synchronized (this) {
+                actual = client;
+                if (actual == null) {
+                    actual = HttpClient.newBuilder()
+                            .connectTimeout(Duration.ofSeconds(10))
+                            .followRedirects(HttpClient.Redirect.ALWAYS)
+                            .build();
+                    client = actual;
+                }
+            }
+        }
+        return actual;
     }
 
     @Override
@@ -52,7 +67,7 @@ public final class ExtensionArtifactDownloader implements FileDownloader {
 
         HttpResponse<byte[]> response;
         try {
-            response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            response = client().send(request, HttpResponse.BodyHandlers.ofByteArray());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new IOException("La descarga de la extensión ha sido interrumpida.", ex);

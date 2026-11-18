@@ -31,6 +31,7 @@ import java.awt.MouseInfo;
 import java.awt.Point;
 import java.awt.PointerInfo;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.event.AWTEventListener;
 import java.awt.event.MouseAdapter;
@@ -46,6 +47,7 @@ import java.util.Objects;
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -404,6 +406,7 @@ public class PanelServidores extends FlatScrollPane {
         JLabel estado = new JLabel();
         estado.setFont(estado.getFont().deriveFont(Font.BOLD, 14f));
         estado.setForeground(AppTheme.getForeground());
+        estado.setIconTextGap(5);
         actualizarEstadoLabel(estado, servidor);
         estado.setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -1082,12 +1085,53 @@ public class PanelServidores extends FlatScrollPane {
         boolean vivo = server != null && server.getServerProcess() != null && server.getServerProcess().isAlive();
         boolean deteniendo = vivo && Boolean.TRUE.equals(server.getDeteniendo());
         boolean iniciando = vivo && !deteniendo && Boolean.TRUE.equals(server.getIniciando());
-        String dotColor = (iniciando || deteniendo) ? "#FF9800" : (vivo ? "#00C853" : "#D50000");
+        Color dotColor = (iniciando || deteniendo) ? COLOR_ESTADO_TRANSICION : (vivo ? COLOR_ESTADO_ACTIVO : COLOR_ESTADO_INACTIVO);
         String texto = deteniendo ? "Deteniendo" : (iniciando ? "Iniciando" : (vivo ? "Activo" : "Inactivo"));
-        String html = "<html><span style='color:" + dotColor + ";'>●</span> " + texto + "</html>";
-        // setText con HTML vuelve a parsear y a maquetar la fila; solo se hace si el estado cambió.
-        if(!html.equals(estado.getText())){
-            estado.setText(html);
+        // Texto plano con un icono de punto: una etiqueta HTML por fila obligaba a parsear y maquetar HTML
+        // para cada servidor al abrir la ventana (unos 0,25 s con 30 servidores).
+        if(!texto.equals(estado.getText())){
+            estado.setText(texto);
+            estado.setIcon(new PuntoEstadoIcon(dotColor));
+        }
+    }
+
+    private static final Color COLOR_ESTADO_TRANSICION = new Color(0xFF9800);
+    private static final Color COLOR_ESTADO_ACTIVO = new Color(0x00C853);
+    private static final Color COLOR_ESTADO_INACTIVO = new Color(0xD50000);
+
+    /** Punto de color del estado del servidor. */
+    static final class PuntoEstadoIcon implements Icon {
+        private static final int TAMANO = 10;
+        private final Color color;
+
+        PuntoEstadoIcon(Color color) {
+            this.color = color;
+        }
+
+        Color getColor() {
+            return color;
+        }
+
+        @Override
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(color);
+                g2.fillOval(x, y, TAMANO, TAMANO);
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return TAMANO;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return TAMANO;
         }
     }
 
